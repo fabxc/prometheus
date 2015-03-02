@@ -207,6 +207,12 @@ type (
 	}
 )
 
+func (e *ScalarLiteral) Value() clientmodel.SampleValue { return e.value }
+
+func (e *ScalarArithExpr) OpType() BinOpType { return e.opType }
+func (e *ScalarArithExpr) LHS() ScalarNode   { return e.lhs }
+func (e *ScalarArithExpr) RHS() ScalarNode   { return e.rhs }
+
 // ----------------------------------------------------------------------------
 // VectorNode types.
 
@@ -246,6 +252,10 @@ type (
 		rhs    Node
 	}
 )
+
+func (e *VectorArithExpr) OpType() BinOpType { return e.opType }
+func (e *VectorArithExpr) LHS() Node         { return e.lhs }
+func (e *VectorArithExpr) RHS() Node         { return e.rhs }
 
 // ----------------------------------------------------------------------------
 // MatrixNode types.

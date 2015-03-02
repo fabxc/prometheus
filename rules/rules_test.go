@@ -928,6 +928,7 @@ func TestExpressions(t *testing.T) {
 
 			if len(exprTest.output) != len(resultLines) {
 				t.Errorf("%d. Number of samples in expected and actual output don't match", i)
+				t.Errorf("%d. Expression: %v, %#v", i, exprTest.expr, testExpr)
 				failed = true
 			}
 
@@ -1225,7 +1226,7 @@ var ruleTests = []struct {
 	{
 		inputFile:   "syntax_error.rules",
 		shouldFail:  true,
-		errContains: "Error parsing rules at line 5",
+		errContains: `unexpected "5" in alert statement`,
 	},
 	{
 		inputFile:   "non_vector.rules",
