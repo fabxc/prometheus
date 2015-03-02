@@ -20,16 +20,6 @@ type parser struct {
 	peekCount  int
 }
 
-// func Parse(name, input string) ([]ast.Statement, error) {
-// 	p := &parser{
-// 		name:  name,
-// 		lex:   lex(name, input),
-// 		stmts: make([]ast.Statement, 0),
-// 	}
-// 	err := p.parse()
-// 	return p.stmts, err
-// }
-
 func ParseExpr(input string) (ast.Node, error) {
 	p := NewParser("", input)
 	err := p.parseExpr()
@@ -80,15 +70,6 @@ Loop:
 	}
 	return
 }
-
-// func (p *parser) parse() (err error) {
-// 	defer p.recover(&err)
-
-// 	for p.peek().typ != itemEOF {
-// 		p.stmts = append(p.stmts, p.statement())
-// 	}
-// 	return nil
-// }
 
 // next returns the next token.
 func (p *parser) next() item {

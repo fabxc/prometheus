@@ -1,42 +1,133 @@
 package rules
 
-// import (
-// 	"math"
-// 	"reflect"
-// 	"testing"
-// 	"time"
-// )
+import (
+	"math"
+	"reflect"
+	"testing"
+	// "time"
 
-// var testSuccessArith = map[string]Node{
-// 	"1":    &ExecStmt{&NumberLiteral{1}},
-// 	"+Inf": &ExecStmt{&NumberLiteral{math.Inf(1)}},
-// 	"-Inf": &ExecStmt{&NumberLiteral{math.Inf(-1)}},
-// 	"1 + 1": &ExecStmt{
-// 		&BinaryExpr{itemADD, &NumberLiteral{1}, &NumberLiteral{1}},
-// 	},
-// 	"+1 + -2 * 1": &ExecStmt{
-// 		&BinaryExpr{
-// 			Op:  itemADD,
-// 			LHS: &UnaryExpr{itemADD, &NumberLiteral{1}},
-// 			RHS: &BinaryExpr{
-// 				Op: itemMUL, LHS: &UnaryExpr{itemSUB, &NumberLiteral{2}}, RHS: &NumberLiteral{1},
-// 			},
-// 		},
-// 	},
-// 	"1 + 2/(3 * 1)": &ExecStmt{
-// 		&BinaryExpr{
-// 			Op:  itemADD,
-// 			LHS: &NumberLiteral{1},
-// 			RHS: &BinaryExpr{
-// 				Op:  itemQUO,
-// 				LHS: &NumberLiteral{2},
-// 				RHS: &ParenExpr{&BinaryExpr{
-// 					Op: itemMUL, LHS: &NumberLiteral{3}, RHS: &NumberLiteral{1},
-// 				}},
-// 			},
-// 		},
-// 	},
-// }
+	clientmodel "github.com/prometheus/client_golang/model"
+	"github.com/prometheus/prometheus/rules/ast"
+	"github.com/prometheus/prometheus/storage/metric"
+)
+
+var exprTests = []struct {
+	input    string
+	expected ast.Node
+	fail     bool
+}{
+	// Arithmetic tests.
+	{
+		input:    "1",
+		expected: ast.NewScalarLiteral(1),
+	},
+	{
+		input:    ".1",
+		expected: ast.NewScalarLiteral(0.1),
+	},
+	{
+		input:    "1.",
+		expected: ast.NewScalarLiteral(1),
+	},
+	{
+		input:    "+Inf",
+		expected: ast.NewScalarLiteral(clientmodel.SampleValue(math.Inf(1))),
+	},
+	{
+		input:    "-Inf",
+		expected: ast.NewScalarLiteral(clientmodel.SampleValue(math.Inf(-1))),
+	},
+	{
+		input:    "-Inf",
+		expected: ast.NewScalarLiteral(clientmodel.SampleValue(math.Inf(-1))),
+	},
+	{
+		input: "1 + 1",
+		expected: must(ast.NewArithExpr(
+			ast.Add,
+			ast.NewScalarLiteral(1),
+			ast.NewScalarLiteral(1),
+		)),
+	},
+	{
+		input: "1 + -2 * 1",
+		expected: must(ast.NewArithExpr(
+			ast.Add,
+			ast.NewScalarLiteral(1),
+			must(ast.NewArithExpr(ast.Mul, ast.NewScalarLiteral(-2), ast.NewScalarLiteral(1))),
+		)),
+	},
+	{
+		input: "1 + 2/(3 * 1)",
+		expected: must(ast.NewArithExpr(
+			ast.Add,
+			ast.NewScalarLiteral(1),
+			must(ast.NewArithExpr(
+				ast.Div,
+				ast.NewScalarLiteral(2),
+				must(ast.NewArithExpr(ast.Mul, ast.NewScalarLiteral(3), ast.NewScalarLiteral(1))),
+			)),
+		)),
+	},
+	// Function calls.
+	{
+		input: "ceil(metric_name)",
+		expected: must(ast.NewFunctionCall(
+			mustGetFunction("ceil"),
+			[]ast.Node{ast.NewVectorSelector(
+				metric.LabelMatchers{mustLabelMatcher(
+					metric.Equal,
+					clientmodel.LabelName("__name__"),
+					clientmodel.LabelValue("metric_name"),
+				)},
+				0),
+			},
+		)),
+	},
+}
+
+func must(node ast.Node, err error) ast.Node {
+	if err != nil {
+		panic(err)
+	}
+	return node
+}
+
+func mustLabelMatcher(mt metric.MatchType, name clientmodel.LabelName, value clientmodel.LabelValue) *metric.LabelMatcher {
+	lm, err := metric.NewLabelMatcher(mt, name, value)
+	if err != nil {
+		panic(err)
+	}
+	return lm
+}
+
+func mustGetFunction(name string) *ast.Function {
+	f, err := ast.GetFunction(name)
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+
+func TestExprParse(t *testing.T) {
+	for i, test := range exprTests {
+		expr, err := ParseExpr(test.input)
+		if !test.fail && err != nil {
+			t.Logf("in expression %d: %s", i, test.input)
+			t.Errorf("error on parsing: %s", err)
+			continue
+		}
+		if test.fail && err == nil {
+			t.Logf("in expression %d: %s", i, test.input)
+			t.Errorf("expected parsing error but got none")
+			continue
+		}
+		if !reflect.DeepEqual(test.expected, expr) {
+			t.Logf("in expression %d: %s", i, test.input)
+			t.Errorf("error in parsed expression:\n\nexpcted: %#q\n------\ngot: %#q", test.expected, expr)
+		}
+	}
+}
 
 // var (
 // 	ceil = reflect.ValueOf(funcCeil)
