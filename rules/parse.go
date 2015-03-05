@@ -59,7 +59,7 @@ Loop:
 			break Loop
 		case itemAlert:
 			p.rules = append(p.rules, p.alertStmt())
-		case itemIdentifier:
+		case itemIdentifier, itemMetricIdentifier:
 			p.rules = append(p.rules, p.recordStmt())
 		default:
 			p.errorf("no valid statement detected for %q", tok)
