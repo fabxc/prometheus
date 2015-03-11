@@ -27,10 +27,7 @@ import (
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
-	"github.com/prometheus/prometheus/rules"
-	"github.com/prometheus/prometheus/rules/ast"
-	"github.com/prometheus/prometheus/stats"
-	"github.com/prometheus/prometheus/storage/local"
+	"github.com/prometheus/prometheus/promql"
 )
 
 // A version of vector that's easier to use from templates.
@@ -57,18 +54,18 @@ func (q queryResultByLabelSorter) Swap(i, j int) {
 	q.results[i], q.results[j] = q.results[j], q.results[i]
 }
 
-func query(q string, timestamp clientmodel.Timestamp, storage local.Storage) (queryResult, error) {
-	exprNode, err := rules.LoadExprFromString(q)
+func query(q string, timestamp clientmodel.Timestamp, engine *promql.Engine) (queryResult, error) {
+	query, err := engine.QueryInstant(q, timestamp)
 	if err != nil {
 		return nil, err
 	}
-	queryStats := stats.NewTimerGroup()
-	vector, err := ast.EvalToVector(exprNode, timestamp, storage, queryStats)
+	query.Exec()
+	vector, err := query.Result().Vector()
 	if err != nil {
 		return nil, err
 	}
 
-	// ast.Vector is hard to work with in templates, so convert to
+	// promql.Vector is hard to work with in templates, so convert to
 	// base data types.
 	var result = make(queryResult, len(vector))
 	for n, v := range vector {
@@ -92,14 +89,14 @@ type templateExpander struct {
 }
 
 // NewTemplateExpander returns a template expander ready to use.
-func NewTemplateExpander(text string, name string, data interface{}, timestamp clientmodel.Timestamp, storage local.Storage) *templateExpander {
+func NewTemplateExpander(text string, name string, data interface{}, timestamp clientmodel.Timestamp, engine *promql.Engine) *templateExpander {
 	return &templateExpander{
 		text: text,
 		name: name,
 		data: data,
 		funcMap: text_template.FuncMap{
 			"query": func(q string) (queryResult, error) {
-				return query(q, timestamp, storage)
+				return query(q, timestamp, engine)
 			},
 			"first": func(v queryResult) (*sample, error) {
 				if len(v) > 0 {
@@ -132,8 +129,8 @@ func NewTemplateExpander(text string, name string, data interface{}, timestamp c
 			},
 			"match":     regexp.MatchString,
 			"title":     strings.Title,
-			"graphLink": rules.GraphLinkForExpression,
-			"tableLink": rules.TableLinkForExpression,
+			"graphLink": promql.GraphLinkForExpression,
+			"tableLink": promql.TableLinkForExpression,
 			"sortByLabel": func(label string, v queryResult) queryResult {
 				sorter := queryResultByLabelSorter{v[:], label}
 				sort.Stable(sorter)

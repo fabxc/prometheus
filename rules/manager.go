@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package manager
+package rules
 
 import (
 	"fmt"
@@ -23,11 +23,8 @@ import (
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
-	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/notification"
-	"github.com/prometheus/prometheus/rules"
-	"github.com/prometheus/prometheus/storage"
-	"github.com/prometheus/prometheus/storage/local"
+	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/templates"
 )
 
@@ -73,27 +70,25 @@ func init() {
 // A RuleManager manages recording and alerting rules. Create instances with
 // NewRuleManager.
 type RuleManager interface {
-	// Load and add rules from rule files specified in the configuration.
-	AddRulesFromConfig(config config.Config) error
 	// Start the rule manager's periodic rule evaluation.
 	Run()
 	// Stop the rule manager's rule evaluation cycles.
 	Stop()
 	// Return all rules.
-	Rules() []rules.Rule
+	Rules() []Rule
 	// Return all alerting rules.
-	AlertingRules() []*rules.AlertingRule
+	AlertingRules() []*AlertingRule
 }
 
 type ruleManager struct {
 	// Protects the rules list.
 	sync.Mutex
-	rules []rules.Rule
+	rules []Rule
 
 	done chan bool
 
 	interval time.Duration
-	storage  local.Storage
+	engine   *promql.Engine
 
 	sampleAppender      storage.SampleAppender
 	notificationHandler *notification.NotificationHandler
@@ -104,7 +99,7 @@ type ruleManager struct {
 // RuleManagerOptions bundles options for the RuleManager.
 type RuleManagerOptions struct {
 	EvaluationInterval time.Duration
-	Storage            local.Storage
+	Engine             *promql.Engine
 
 	NotificationHandler *notification.NotificationHandler
 	SampleAppender      storage.SampleAppender
@@ -116,15 +111,18 @@ type RuleManagerOptions struct {
 // by calling the Run method.
 func NewRuleManager(o *RuleManagerOptions) RuleManager {
 	manager := &ruleManager{
-		rules: []rules.Rule{},
+		rules: []Rule{},
 		done:  make(chan bool),
 
 		interval:            o.EvaluationInterval,
-		storage:             o.Storage,
 		sampleAppender:      o.SampleAppender,
+		engine:              o.Engine,
 		notificationHandler: o.NotificationHandler,
 		prometheusURL:       o.PrometheusURL,
 	}
+	manager.engine.RegisterAlertHandler("rule_manager", manager.AddAlertRule)
+	manager.engine.RegisterRecordHandler("rule_manager", manager.AddRecordingRule)
+
 	return manager
 }
 
@@ -160,7 +158,7 @@ func (m *ruleManager) Stop() {
 	m.done <- true
 }
 
-func (m *ruleManager) queueAlertNotifications(rule *rules.AlertingRule, timestamp clientmodel.Timestamp) {
+func (m *ruleManager) queueAlertNotifications(rule *AlertingRule, timestamp clientmodel.Timestamp) {
 	activeAlerts := rule.ActiveAlerts()
 	if len(activeAlerts) == 0 {
 		return
@@ -168,7 +166,7 @@ func (m *ruleManager) queueAlertNotifications(rule *rules.AlertingRule, timestam
 
 	notifications := make(notification.NotificationReqs, 0, len(activeAlerts))
 	for _, aa := range activeAlerts {
-		if aa.State != rules.Firing {
+		if aa.State != Firing {
 			// BUG: In the future, make AlertManager support pending alerts?
 			continue
 		}
@@ -190,7 +188,7 @@ func (m *ruleManager) queueAlertNotifications(rule *rules.AlertingRule, timestam
 		defs := "{{$labels := .Labels}}{{$value := .Value}}"
 
 		expand := func(text string) string {
-			template := templates.NewTemplateExpander(defs+text, "__alert_"+rule.Name(), tmplData, timestamp, m.storage)
+			template := templates.NewTemplateExpander(defs+text, "__alert_"+rule.Name(), tmplData, timestamp, m.engine)
 			result, err := template.Expand()
 			if err != nil {
 				result = err.Error()
@@ -203,12 +201,12 @@ func (m *ruleManager) queueAlertNotifications(rule *rules.AlertingRule, timestam
 			Summary:     expand(rule.Summary),
 			Description: expand(rule.Description),
 			Labels: aa.Labels.Merge(clientmodel.LabelSet{
-				rules.AlertNameLabel: clientmodel.LabelValue(rule.Name()),
+				AlertNameLabel: clientmodel.LabelValue(rule.Name()),
 			}),
 			Value:        aa.Value,
 			ActiveSince:  aa.ActiveSince.Time(),
 			RuleString:   rule.String(),
-			GeneratorURL: m.prometheusURL + rules.GraphLinkForExpression(rule.Vector.String()),
+			GeneratorURL: m.prometheusURL + promql.GraphLinkForExpression(rule.Vector.String()),
 		})
 	}
 	m.notificationHandler.SubmitReqs(notifications)
@@ -219,18 +217,18 @@ func (m *ruleManager) runIteration() {
 	wg := sync.WaitGroup{}
 
 	m.Lock()
-	rulesSnapshot := make([]rules.Rule, len(m.rules))
+	rulesSnapshot := make([]Rule, len(m.rules))
 	copy(rulesSnapshot, m.rules)
 	m.Unlock()
 
 	for _, rule := range rulesSnapshot {
 		wg.Add(1)
 		// BUG(julius): Look at fixing thundering herd.
-		go func(rule rules.Rule) {
+		go func(rule Rule) {
 			defer wg.Done()
 
 			start := time.Now()
-			vector, err := rule.Eval(now, m.storage)
+			vector, err := rule.Eval(now, m.engine)
 			duration := time.Since(start)
 
 			if err != nil {
@@ -240,17 +238,17 @@ func (m *ruleManager) runIteration() {
 			}
 
 			switch r := rule.(type) {
-			case *rules.AlertingRule:
+			case *AlertingRule:
 				m.queueAlertNotifications(r, now)
 				evalDuration.WithLabelValues(alertingRuleType).Observe(
 					float64(duration / time.Millisecond),
 				)
-			case *rules.RecordingRule:
+			case *RecordingRule:
 				evalDuration.WithLabelValues(recordingRuleType).Observe(
 					float64(duration / time.Millisecond),
 				)
 			default:
-				panic(fmt.Sprintf("Unknown rule type: %T", rule))
+				panic(fmt.Errorf("Unknown rule type: %T", rule))
 			}
 
 			for _, s := range vector {
@@ -265,35 +263,40 @@ func (m *ruleManager) runIteration() {
 	wg.Wait()
 }
 
-func (m *ruleManager) AddRulesFromConfig(config config.Config) error {
-	for _, ruleFile := range config.Global.RuleFile {
-		newRules, err := rules.LoadRulesFromFile(ruleFile)
-		if err != nil {
-			return fmt.Errorf("%s: %s", ruleFile, err)
-		}
-		m.Lock()
-		m.rules = append(m.rules, newRules...)
-		m.Unlock()
-	}
+func (m *ruleManager) AddAlertRule(r *promql.AlertStmt) error {
+	rule := NewAlertingRule(r.Name, r.Expr, r.Duration, r.Labels, r.Summary, r.Description)
+
+	m.Lock()
+	m.rules = append(m.rules, rule)
+	m.Unlock()
 	return nil
 }
 
-func (m *ruleManager) Rules() []rules.Rule {
+func (m *ruleManager) AddRecordingRule(r *promql.RecordStmt) error {
+	rule := &RecordingRule{r.Name, r.Expr, r.Labels, r.Permanent}
+
+	m.Lock()
+	m.rules = append(m.rules, rule)
+	m.Unlock()
+	return nil
+}
+
+func (m *ruleManager) Rules() []Rule {
 	m.Lock()
 	defer m.Unlock()
 
-	rules := make([]rules.Rule, len(m.rules))
+	rules := make([]Rule, len(m.rules))
 	copy(rules, m.rules)
 	return rules
 }
 
-func (m *ruleManager) AlertingRules() []*rules.AlertingRule {
+func (m *ruleManager) AlertingRules() []*AlertingRule {
 	m.Lock()
 	defer m.Unlock()
 
-	alerts := []*rules.AlertingRule{}
+	alerts := []*AlertingRule{}
 	for _, rule := range m.rules {
-		if alertingRule, ok := rule.(*rules.AlertingRule); ok {
+		if alertingRule, ok := rule.(*AlertingRule); ok {
 			alerts = append(alerts, alertingRule)
 		}
 	}

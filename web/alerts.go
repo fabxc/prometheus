@@ -19,7 +19,6 @@ import (
 	"sync"
 
 	"github.com/prometheus/prometheus/rules"
-	"github.com/prometheus/prometheus/rules/manager"
 )
 
 // AlertStatus bundles alerting rules and the mapping of alert states to row
@@ -47,7 +46,7 @@ func (s byAlertStateSorter) Swap(i, j int) {
 
 // AlertsHandler implements http.Handler.
 type AlertsHandler struct {
-	RuleManager manager.RuleManager
+	RuleManager rules.RuleManager
 
 	mutex sync.Mutex
 }

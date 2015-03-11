@@ -26,9 +26,7 @@ import (
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
-	"github.com/prometheus/prometheus/rules"
-	"github.com/prometheus/prometheus/rules/ast"
-	"github.com/prometheus/prometheus/stats"
+	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/web/httputils"
 )
 
@@ -74,22 +72,44 @@ func (serv MetricsService) Query(w http.ResponseWriter, r *http.Request) {
 	params := httputils.GetQueryParams(r)
 	expr := params.Get("expr")
 
+	asText := params.Get("asText")
+
+	var format OutputFormat
+	// BUG(julius): Use Content-Type negotiation.
+	if asText == "" {
+		format = OutputJSON
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		format = OutputText
+		w.Header().Set("Content-Type", "text/plain")
+	}
+
 	timestamp, err := parseTimestampOrNow(params.Get("timestamp"), serv.Now())
 	if err != nil {
 		httpJSONError(w, fmt.Errorf("invalid query timestamp %s", err), http.StatusBadRequest)
 		return
 	}
 
-	exprNode, err := rules.LoadExprFromString(expr)
+	query, err := serv.Engine.QueryInstant(expr, timestamp)
 	if err != nil {
-		fmt.Fprint(w, ast.ErrorToJSON(err))
+		fmt.Fprint(w, errorToJSON(err))
 		return
 	}
+	query.Exec()
 
-	queryStats := stats.NewTimerGroup()
-	result := ast.EvalToString(exprNode, timestamp, ast.JSON, serv.Storage, queryStats)
-	glog.V(1).Infof("Instant query: %s\nQuery stats:\n%s\n", expr, queryStats)
-	fmt.Fprint(w, result)
+	res, err := query.Result().Vector()
+	if err != nil {
+		fmt.Fprint(w, errorToJSON(err))
+		return
+	}
+	glog.V(1).Infof("Instant query: %s\nQuery stats:\n%s\n", expr, query.Stats())
+
+	if format == OutputJSON {
+		fmt.Fprint(w, valueToJSON(res))
+	}
+	if format == OutputText {
+		fmt.Fprint(w, res.String())
+	}
 }
 
 // QueryRange handles the /api/query_range endpoint.
@@ -138,37 +158,28 @@ func (serv MetricsService) QueryRange(w http.ResponseWriter, r *http.Request) {
 	// For safety, limit the number of returned points per timeseries.
 	// This is sufficient for 60s resolution for a week or 1h resolution for a year.
 	if duration/step > 11000 {
-		fmt.Fprint(w, ast.ErrorToJSON(errors.New("exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")))
+		fmt.Fprint(w, errorToJSON(errors.New("exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")))
 		return
 	}
 
 	// Align the start to step "tick" boundary.
 	end = end.Add(-time.Duration(end.UnixNano() % int64(step)))
 
-	queryStats := stats.NewTimerGroup()
-
-	matrix, err := ast.EvalVectorRange(
-		exprNode.(ast.VectorNode),
-		end.Add(-duration),
-		end,
-		step,
-		serv.Storage,
-		queryStats)
+	query, err := serv.Engine.QueryRange(expr, start, clientmodel.TimestampFromUnixNano(end), time.Duration(step))
 	if err != nil {
-		fmt.Fprint(w, ast.ErrorToJSON(err))
+		fmt.Fprint(w, errorToJSON(err))
+		return
+	}
+	// TODO(fabxc): check query type.
+	query.Exec()
+	matrix, err := query.Result().Matrix()
+	if err != nil {
+		fmt.Fprint(w, errorToJSON(err))
 		return
 	}
 
-	sortTimer := queryStats.GetTimer(stats.ResultSortTime).Start()
-	sort.Sort(matrix)
-	sortTimer.Stop()
-
-	jsonTimer := queryStats.GetTimer(stats.JSONEncodeTime).Start()
-	result := ast.TypedValueToJSON(matrix, "matrix")
-	jsonTimer.Stop()
-
 	glog.V(1).Infof("Range query: %s\nQuery stats:\n%s\n", expr, queryStats)
-	fmt.Fprint(w, result)
+	fmt.Fprint(w, valueToJSON(matrix))
 }
 
 // Metrics handles the /api/metrics endpoint.
@@ -185,4 +196,51 @@ func (serv MetricsService) Metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(resultBytes)
+}
+
+type OutputFormat int
+
+const (
+	OutputText = 1
+	OutputJSON = 2
+)
+
+var jsonFormatVersion = 1
+
+// ErrorToJSON converts the given error into JSON.
+func errorToJSON(err error) string {
+	errorStruct := struct {
+		Type    string `json:"type"`
+		Value   string `json:"value"`
+		Version int    `json:"version"`
+	}{
+		Type:    "error",
+		Value:   err.Error(),
+		Version: jsonFormatVersion,
+	}
+
+	errorJSON, err := json.Marshal(errorStruct)
+	if err != nil {
+		return ""
+	}
+	return string(errorJSON)
+}
+
+// TypedValueToJSON converts the given data of type 'scalar',
+// 'vector', or 'matrix' into its JSON representation.
+func valueToJSON(data promql.Value) string {
+	dataStruct := struct {
+		Type    string       `json:"type"`
+		Value   promql.Value `json:"value"`
+		Version int          `json:"version"`
+	}{
+		Type:    data.Type().String(),
+		Value:   data,
+		Version: jsonFormatVersion,
+	}
+	dataJSON, err := json.Marshal(dataStruct)
+	if err != nil {
+		return errorToJSON(err)
+	}
+	return string(dataJSON)
 }

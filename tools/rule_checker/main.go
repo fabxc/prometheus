@@ -19,10 +19,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 
 	"github.com/golang/glog"
 
-	"github.com/prometheus/prometheus/rules"
+	"github.com/prometheus/prometheus/promql"
 )
 
 var ruleFile = flag.String("rule-file", "", "The path to the rule file to check.")
@@ -33,8 +34,12 @@ func main() {
 	if *ruleFile == "" {
 		glog.Fatal("Must provide a rule file path")
 	}
+	content, err := ioutil.ReadFile(*ruleFile)
+	if err != nil {
+		glog.Fatalf("Error reading rule file: %s", err)
+	}
 
-	rules, err := rules.LoadRulesFromFile(*ruleFile)
+	rules, err := promql.Parse("rule_checker", string(content))
 	if err != nil {
 		glog.Fatalf("Error loading rule file %s: %s", *ruleFile, err)
 	}

@@ -20,15 +20,13 @@ import (
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
-	"github.com/prometheus/prometheus/rules/ast"
-	"github.com/prometheus/prometheus/stats"
-	"github.com/prometheus/prometheus/storage/local"
+	"github.com/prometheus/prometheus/promql"
 )
 
 // A RecordingRule records its vector expression into new timeseries.
 type RecordingRule struct {
 	name      string
-	vector    ast.VectorNode
+	vector    promql.Expr
 	labels    clientmodel.LabelSet
 	permanent bool
 }
@@ -37,13 +35,18 @@ type RecordingRule struct {
 func (rule RecordingRule) Name() string { return rule.name }
 
 // EvalRaw returns the raw value of the rule expression.
-func (rule RecordingRule) EvalRaw(timestamp clientmodel.Timestamp, storage local.Storage) (ast.Vector, error) {
-	return ast.EvalVectorInstant(rule.vector, timestamp, storage, stats.NewTimerGroup())
+func (rule RecordingRule) EvalRaw(timestamp clientmodel.Timestamp, engine *promql.Engine) (promql.Vector, error) {
+	query, err := engine.QueryInstant(rule.vector.String(), timestamp)
+	if err != nil {
+		return nil, err
+	}
+	query.Exec()
+	return query.Result().Vector()
 }
 
 // Eval evaluates the rule and then overrides the metric names and labels accordingly.
-func (rule RecordingRule) Eval(timestamp clientmodel.Timestamp, storage local.Storage) (ast.Vector, error) {
-	vector, err := rule.EvalRaw(timestamp, storage)
+func (rule RecordingRule) Eval(timestamp clientmodel.Timestamp, engine *promql.Engine) (promql.Vector, error) {
+	vector, err := rule.EvalRaw(timestamp, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +76,7 @@ func (rule RecordingRule) ToDotGraph() string {
 	}`,
 		&rule, rule.name,
 		&rule, reflect.ValueOf(rule.vector).Pointer(),
-		rule.vector.NodeTreeToDotGraph(),
+		// rule.vector.NodeTreeToDotGraph(),
 	)
 	return graph
 }
@@ -87,9 +90,9 @@ func (rule RecordingRule) HTMLSnippet() template.HTML {
 	ruleExpr := rule.vector.String()
 	return template.HTML(fmt.Sprintf(
 		`<a href="%s">%s</a>%s = <a href="%s">%s</a>`,
-		GraphLinkForExpression(rule.name),
+		promql.GraphLinkForExpression(rule.name),
 		rule.name,
 		rule.labels,
-		GraphLinkForExpression(ruleExpr),
+		promql.GraphLinkForExpression(ruleExpr),
 		ruleExpr))
 }

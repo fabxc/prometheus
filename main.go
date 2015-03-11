@@ -29,9 +29,9 @@ import (
 
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/notification"
+	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/retrieval"
-	"github.com/prometheus/prometheus/rules/manager"
-	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/remote/opentsdb"
@@ -69,7 +69,8 @@ var (
 )
 
 type prometheus struct {
-	ruleManager         manager.RuleManager
+	engine              *promql.Engine
+	ruleManager         rules.RuleManager
 	targetManager       retrieval.TargetManager
 	notificationHandler *notification.NotificationHandler
 	storage             local.Storage
@@ -135,15 +136,24 @@ func NewPrometheus() *prometheus {
 	targetManager := retrieval.NewTargetManager(sampleAppender, conf.GlobalLabels())
 	targetManager.AddTargetsFromConfig(conf)
 
+	engine := promql.NewEngine(memStorage)
+
 	ruleManager := manager.NewRuleManager(&manager.RuleManagerOptions{
 		SampleAppender:      sampleAppender,
 		NotificationHandler: notificationHandler,
 		EvaluationInterval:  conf.EvaluationInterval(),
-		Storage:             memStorage,
+		Engine:              engine,
 		PrometheusURL:       web.MustBuildServerURL(),
 	})
-	if err := ruleManager.AddRulesFromConfig(conf); err != nil {
-		glog.Fatal("Error loading rule files: ", err)
+	for _, rf := range conf.Global.RuleFile {
+		query, err := engine.QueryFromFile(rf)
+		if err != nil {
+			glog.Fatalf("Error loading rule file %q: %s", rf, err)
+		}
+		query.Exec()
+		if res := query.Result(); res.Err != nil {
+			glog.Fatalf("Error initializing rules: %s", res.Err)
+		}
 	}
 
 	flags := map[string]string{}
@@ -164,12 +174,13 @@ func NewPrometheus() *prometheus {
 	}
 
 	consolesHandler := &web.ConsolesHandler{
-		Storage: memStorage,
+		Engine: engine,
 	}
 
 	metricsService := &api.MetricsService{
 		Now:     clientmodel.Now,
 		Storage: memStorage,
+		Engine:  engine,
 	}
 
 	webService := &web.WebService{
@@ -180,6 +191,7 @@ func NewPrometheus() *prometheus {
 	}
 
 	p := &prometheus{
+		engine:              engine,
 		ruleManager:         ruleManager,
 		targetManager:       targetManager,
 		notificationHandler: notificationHandler,
