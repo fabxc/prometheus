@@ -24,13 +24,14 @@ import (
 	"github.com/prometheus/prometheus/storage/local"
 )
 
+// An Analyzer traverses an expression and determines which data has to be requested
+// from the storage. It is bound to a context that allows cancellation and timing out.
 type Analyzer struct {
 	ctx context.Context
-	ng  *Engine
+	ng  *Engine // The engine that launched the Analyzer.
 
-	Expr  Expr
-	Start clientmodel.Timestamp
-	End   clientmodel.Timestamp
+	Expr       Expr                  // The expression being analyzed.
+	Start, End clientmodel.Timestamp // The time range for evaluation of Expr.
 
 	offsetPreloadTimes map[time.Duration]preloadTimes
 }
@@ -49,6 +50,8 @@ type preloadTimes struct {
 	ranges map[clientmodel.Fingerprint]time.Duration
 }
 
+// analyze the provided expression and attach metrics and fingerprints to data-selecting
+// AST nodes that are later used to preload the data from the storage.
 func (a *Analyzer) analyze() {
 	a.offsetPreloadTimes = make(map[time.Duration]preloadTimes)
 
@@ -102,6 +105,8 @@ func (a *Analyzer) analyze() {
 	})
 }
 
+// prepare the expression evaluation by preloading all required chunks from the storage
+// and setting the respective storage iterators in the AST nodes.
 func (a *Analyzer) prepare() (local.Preloader, error) {
 	if a.offsetPreloadTimes == nil {
 		return nil, errors.New("analysis must be performed before preparing query")
@@ -112,20 +117,26 @@ func (a *Analyzer) prepare() (local.Preloader, error) {
 
 	// Preload all analyzed ranges.
 	for offset, pt := range a.offsetPreloadTimes {
-		start := a.Start.Add(-offset)
-		end := a.End.Add(-offset)
-		for fp, rangeDuration := range pt.ranges {
-			err := p.PreloadRange(fp, start.Add(-rangeDuration), end, *stalenessDelta)
-			if err != nil {
-				p.Close()
-				return nil, err
+		select {
+		case <-a.ctx.Done():
+			return nil, a.ctx.Err()
+
+		default:
+			start := a.Start.Add(-offset)
+			end := a.End.Add(-offset)
+			for fp, rangeDuration := range pt.ranges {
+				err := p.PreloadRange(fp, start.Add(-rangeDuration), end, *stalenessDelta)
+				if err != nil {
+					p.Close()
+					return nil, err
+				}
 			}
-		}
-		for fp := range pt.instants {
-			err := p.PreloadRange(fp, start, end, *stalenessDelta)
-			if err != nil {
-				p.Close()
-				return nil, err
+			for fp := range pt.instants {
+				err := p.PreloadRange(fp, start, end, *stalenessDelta)
+				if err != nil {
+					p.Close()
+					return nil, err
+				}
 			}
 		}
 	}

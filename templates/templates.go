@@ -28,6 +28,7 @@ import (
 	clientmodel "github.com/prometheus/client_golang/model"
 
 	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/utility"
 )
 
 // A version of vector that's easier to use from templates.
@@ -129,8 +130,8 @@ func NewTemplateExpander(text string, name string, data interface{}, timestamp c
 			},
 			"match":     regexp.MatchString,
 			"title":     strings.Title,
-			"graphLink": promql.GraphLinkForExpression,
-			"tableLink": promql.TableLinkForExpression,
+			"graphLink": utility.GraphLinkForExpression,
+			"tableLink": utility.TableLinkForExpression,
 			"sortByLabel": func(label string, v queryResult) queryResult {
 				sorter := queryResultByLabelSorter{v[:], label}
 				sort.Stable(sorter)

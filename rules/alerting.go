@@ -221,9 +221,9 @@ func (rule *AlertingRule) HTMLSnippet() template.HTML {
 	}
 	return template.HTML(fmt.Sprintf(
 		`ALERT <a href="%s">%s</a> IF <a href="%s">%s</a> FOR %s WITH %s`,
-		promql.GraphLinkForExpression(alertMetric.String()),
+		utility.GraphLinkForExpression(alertMetric.String()),
 		rule.name,
-		promql.GraphLinkForExpression(rule.Vector.String()),
+		utility.GraphLinkForExpression(rule.Vector.String()),
 		rule.Vector,
 		utility.DurationToString(rule.holdDuration),
 		rule.Labels))

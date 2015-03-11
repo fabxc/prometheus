@@ -8,18 +8,21 @@ import (
 	"github.com/prometheus/prometheus/storage/metric"
 )
 
+// Node is a generic interface for all nodes in an AST.
 type Node interface {
 	String() string
 	// NodeTreeToDotGraph() string
 }
 
-type Statements []Statement
-
+// Statement is a generic interface for all statements.
 type Statement interface {
 	Node
 	stmt()
 }
 
+type Statements []Statement
+
+// AlertStmt represents an added alert rule.
 type AlertStmt struct {
 	Name        string
 	Expr        Expr
@@ -29,6 +32,7 @@ type AlertStmt struct {
 	Description string
 }
 
+// RecordStmt represents an added recording rule.
 type RecordStmt struct {
 	Name      string
 	Expr      Expr
@@ -36,64 +40,115 @@ type RecordStmt struct {
 	Permanent bool
 }
 
+// EvalStmt holds an expression and information on the range it should
+// be evaluated on.
 type EvalStmt struct {
-	Expr Expr
+	Expr Expr // Expression to be evaluated.
 
+	// The time boundaries for the evaluation. If Start equals End and instant
+	// is evaluated.
 	Start, End clientmodel.Timestamp
-	Interval   time.Duration
+	// Time between two evaluated instants for the range [Start:End].
+	Interval time.Duration
 }
 
 func (*EvalStmt) stmt()   {}
 func (*AlertStmt) stmt()  {}
 func (*RecordStmt) stmt() {}
 
+type ExprType int
+
+const (
+	NoExpr ExprType = iota
+	ExprScalar
+	ExprVector
+	ExprMatrix
+	ExprString
+)
+
+func (e ExprType) String() string {
+	switch e {
+	case NoExpr:
+		return "<NoExpr>"
+	case ExprScalar:
+		return "scalar"
+	case ExprVector:
+		return "vector"
+	case ExprMatrix:
+		return "matrix"
+	case ExprString:
+		return "string"
+	}
+	panic("unreachable")
+}
+
+// Expr is a generic interface for all expression types.
 type Expr interface {
 	Node
 	expr()
 }
 
+// ParenExpr wraps an expression so it cannot be disassembled as a consequence
+// of operator precendence.
 type ParenExpr struct {
 	Expr Expr
 }
 
+// UnaryExpr represents a unary operation on another expression.
+// Currently unary operations are only supported for scalars.
 type UnaryExpr struct {
 	Op   itemType
 	Expr Expr
 }
 
+// BinaryExpr represents a binary expression between two child expressions.
 type BinaryExpr struct {
-	Op       itemType
-	LHS, RHS Expr
+	Op       itemType // The operation of the expression.
+	LHS, RHS Expr     // The operands on the respective sides of the operator.
 
+	// The matching behavior for the operation if both operands are vectors.
+	// If they are not this field is nil.
 	VectorMatching *VectorMatching
 }
 
+// VectorMatching describes how elements from two vectors in a binary
+// operation are supposed to be matched.
 type VectorMatching struct {
-	Card    VectorMatchCardinality
-	On      clientmodel.LabelNames
+	// The cardinality of the two vectors.
+	Card VectorMatchCardinality
+	// On contains the labels which define equality of a pair
+	// of elements from the vectors.
+	On clientmodel.LabelNames
+	// Include contains additional labels that should be included in
+	// the result from the side with the higher cardinality.
 	Include clientmodel.LabelNames
 }
 
+// AggregateExpr represents an aggregation operation on a vector.
 type AggregateExpr struct {
-	Op              itemType
-	Expr            Expr
-	Grouping        clientmodel.LabelNames
-	KeepExtraLabels bool
+	Op              itemType               // The used aggregation operation.
+	Expr            Expr                   // The vector expression over which is aggregated.
+	Grouping        clientmodel.LabelNames // The labels by which to group the vector.
+	KeepExtraLabels bool                   // Whether to keep extra labels common among result elements.
 }
 
+// Call represents a function call.
 type Call struct {
-	Func *Function
-	Args []Expr
+	Func *Function // The function that was called.
+	Args []Expr    // Arguments used in the call.
 }
 
+// StringLiteral represents a string.
 type StringLiteral struct {
 	S string
 }
 
+// NumberLiteral represents a number.
 type NumberLiteral struct {
 	N clientmodel.SampleValue
 }
 
+// MatrixSelector represents a matrix selection.
 type MatrixSelector struct {
 	Name          string
 	Interval      time.Duration
@@ -107,6 +162,7 @@ type MatrixSelector struct {
 	fingerprints clientmodel.Fingerprints
 }
 
+// VectorSelector represents a vector selection.
 type VectorSelector struct {
 	Name          string
 	Offset        time.Duration
@@ -129,6 +185,8 @@ func (*NumberLiteral) expr()  {}
 func (*VectorSelector) expr() {}
 func (*MatrixSelector) expr() {}
 
+// VectorMatchCardinaly describes the cardinality relationship
+// of two vectors in a binary operation.
 type VectorMatchCardinality int
 
 const (

@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"os"
 
 	"github.com/golang/glog"
 
@@ -32,16 +33,19 @@ func main() {
 	flag.Parse()
 
 	if *ruleFile == "" {
-		glog.Fatal("Must provide a rule file path")
+		glog.Error("Must provide a rule file path")
+		os.Exit(1)
 	}
 	content, err := ioutil.ReadFile(*ruleFile)
 	if err != nil {
-		glog.Fatalf("Error reading rule file: %s", err)
+		glog.Errorf("Error reading rule file: %s", err)
+		os.Exit(1)
 	}
 
 	rules, err := promql.Parse("rule_checker", string(content))
 	if err != nil {
-		glog.Fatalf("Error loading rule file %s: %s", *ruleFile, err)
+		glog.Errorf("Error loading rule file %s: %s", *ruleFile, err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("Successfully loaded %d rules:\n\n", len(rules))

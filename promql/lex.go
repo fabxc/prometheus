@@ -26,7 +26,7 @@ func (i item) String() string {
 	case i.typ.isOperator():
 		return fmt.Sprintf("<op:%s>", i.val)
 	case i.typ.isAggregator():
-		return fmt.Sprintf("<aggre:%s>", i.val)
+		return fmt.Sprintf("<aggr:%s>", i.val)
 	case len(i.val) > 10:
 		return fmt.Sprintf("%.10q...", i.val)
 	}
@@ -35,15 +35,15 @@ func (i item) String() string {
 
 // isOperator returns true if the item corresponds to a logical or arithmetic operator.
 // Returns false otherwise.
-func (i itemType) isOperator() bool { return i > itemOperators && i < itemAggregators }
+func (i itemType) isOperator() bool { return i > operators_start && i < operators_end }
 
 // isAggregator returns true if the item belongs to the aggregator functions.
 // Returns false otherwise
-func (i itemType) isAggregator() bool { return i > itemAggregators && i < itemKeywords }
+func (i itemType) isAggregator() bool { return i > aggregators_start && i < aggregators_end }
 
 // isKeyword returns true if the item corresponds to a keyword.
 // Returns false otherwise.
-func (i itemType) isKeyword() bool { return i > itemKeywords }
+func (i itemType) isKeyword() bool { return i > keywords_start && i < keywords_end }
 
 // A set of constants for precedence-based expression parsing.
 // Non-operators have lowest precedence, followed by operators
@@ -97,7 +97,7 @@ const (
 
 	// regex ops are used for label matcher
 
-	itemOperators
+	operators_start
 	// operators
 	itemSUB
 	itemADD
@@ -115,16 +115,18 @@ const (
 	// these are only used for label matching
 	itemEQLRegex
 	itemNEQRegex
+	operators_end
 
-	itemAggregators
+	aggregators_start
 	// aggregators
 	itemAvg
 	itemCount
 	itemSum
 	itemMin
 	itemMax
+	aggregators_end
 
-	itemKeywords
+	keywords_start
 	// keywords
 	itemAlert
 	itemEval
@@ -140,6 +142,7 @@ const (
 	itemOn
 	itemGroupLeft
 	itemGroupRight
+	keywords_end
 )
 
 var key = map[string]itemType{
@@ -169,6 +172,43 @@ var key = map[string]itemType{
 	"ON":            itemOn,
 	"GROUP_LEFT":    itemGroupLeft,
 	"GROUP_RIGHT":   itemGroupRight,
+}
+
+var itemTypeStr = map[itemType]string{
+	itemSUB:      "-",
+	itemADD:      "+",
+	itemMUL:      "*",
+	itemREM:      "%",
+	itemQUO:      "/",
+	itemLAND:     "AND",
+	itemLOR:      "OR",
+	itemEQL:      "==",
+	itemNEQ:      "!=",
+	itemLTE:      "<-",
+	itemLSS:      "<",
+	itemGTE:      ">=",
+	itemGTR:      ">",
+	itemEQLRegex: "=~",
+	itemNEQRegex: "!~",
+	itemAvg:      "AVG",
+	itemCount:    "COUNT",
+	itemSum:      "SUM",
+	itemMin:      "MIN",
+	itemMax:      "MAX",
+}
+
+func init() {
+	// Add keywords to item type strings.
+	for s, ty := range key {
+		itemTypeStr[ty] = s
+	}
+}
+
+func (t itemType) String() string {
+	if s, ok := itemTypeStr[t]; ok {
+		return s
+	}
+	return fmt.Sprint(t)
 }
 
 const eof = -1
@@ -293,6 +333,7 @@ const (
 	rightComment = "*/"
 )
 
+// lexStatements is the top-level state for lexing.
 func lexStatements(l *lexer) stateFn {
 	if l.braceOpen {
 		return lexInsideBraces
@@ -551,6 +592,7 @@ func lexNumber(l *lexer) stateFn {
 	return lexStatements
 }
 
+// lexNumberOrDuration scans a number or a duration item.
 func lexNumberOrDuration(l *lexer) stateFn {
 	if l.scanNumber() {
 		l.emit(itemNumber)
@@ -564,10 +606,9 @@ func lexNumberOrDuration(l *lexer) stateFn {
 	return l.errorf("bad number or duration syntax: %q", l.input[l.start:l.pos])
 }
 
+// scanNumber scans numbers of different formats. The scanned item is
+// not necessarily a valid number. This case is caught by the parser.
 func (l *lexer) scanNumber() bool {
-	// Optional leading sign.
-	l.accept("+-")
-	// Is it hex?
 	digits := "0123456789"
 	if l.accept("0") && l.accept("xX") {
 		digits = "0123456789abcdefABCDEF"
@@ -580,7 +621,7 @@ func (l *lexer) scanNumber() bool {
 		l.accept("+-")
 		l.acceptRun("0123456789")
 	}
-	// Next thing mustn't be alphanumeric.
+	// Next thing must not be alphanumeric.
 	if isAlphaNumeric(l.peek()) {
 		return false
 	}

@@ -97,18 +97,18 @@ func (serv MetricsService) Query(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Exec()
 
-	res, err := query.Result().Vector()
-	if err != nil {
-		fmt.Fprint(w, errorToJSON(err))
+	res := query.Result()
+	if res.Err != nil {
+		fmt.Fprint(w, errorToJSON(res.Err))
 		return
 	}
 	glog.V(1).Infof("Instant query: %s\nQuery stats:\n%s\n", expr, query.Stats())
 
 	if format == OutputJSON {
-		fmt.Fprint(w, valueToJSON(res))
+		fmt.Fprint(w, valueToJSON(res.Value))
 	}
 	if format == OutputText {
-		fmt.Fprint(w, res.String())
+		fmt.Fprint(w, res.Value.String())
 	}
 }
 
@@ -178,7 +178,7 @@ func (serv MetricsService) QueryRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	glog.V(1).Infof("Range query: %s\nQuery stats:\n%s\n", expr, queryStats)
+	glog.V(1).Infof("Range query: %s\nQuery stats:\n%s\n", expr, query.Stats())
 	fmt.Fprint(w, valueToJSON(matrix))
 }
 

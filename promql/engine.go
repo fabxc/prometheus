@@ -14,13 +14,14 @@ import (
 	"golang.org/x/net/context"
 
 	clientmodel "github.com/prometheus/client_golang/model"
+	"github.com/prometheus/prometheus/stats"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/metric"
 )
 
 var (
-	stalenessDelta = flag.Duration("query.staleness-delta", 300*time.Second, "Staleness delta allowance during expression evaluations.")
-	queryTimeout   = flag.Duration("query.timeout", 2*time.Minute, "Maximum time a query may take before being aborted.")
+	stalenessDelta      = flag.Duration("query.staleness-delta", 300*time.Second, "Staleness delta allowance during expression evaluations.")
+	defaultQueryTimeout = flag.Duration("query.timeout", 2*time.Minute, "Maximum time a query may take before being aborted.")
 )
 
 // SampleStream is a stream of Values belonging to an attached COWMetric.
@@ -74,6 +75,7 @@ func (matrix Matrix) Swap(i, j int) {
 	matrix[i], matrix[j] = matrix[j], matrix[i]
 }
 
+// Value is a generic interface for values resulting from a query evaluation.
 type Value interface {
 	Type() ExprType
 	String() string
@@ -84,11 +86,14 @@ func (Vector) Type() ExprType  { return ExprVector }
 func (*Scalar) Type() ExprType { return ExprScalar }
 func (String) Type() ExprType  { return ExprString }
 
+// Result holds the resulting value of an execution or an error
+// if any occurred.
 type Result struct {
 	Err   error
 	Value Value
 }
 
+// Vector returns a vector if the result value is one.
 func (r Result) Vector() (Vector, error) {
 	if r.Err != nil {
 		return nil, r.Err
@@ -100,6 +105,7 @@ func (r Result) Vector() (Vector, error) {
 	return v, nil
 }
 
+// Matrix returns a matrix is the result value is one.
 func (r Result) Matrix() (Matrix, error) {
 	if r.Err != nil {
 		return nil, r.Err
@@ -118,10 +124,6 @@ func (res *Result) String() string {
 	return res.Value.String()
 }
 
-func (res *Result) JSON() []byte {
-	return nil
-}
-
 type Query interface {
 	// Exec starts evaluating the query and returns immediately.
 	// The returned channel blocks until the evaluation is done and receives
@@ -130,8 +132,10 @@ type Query interface {
 	// Result returns the result of the evaluated query. It blocks until the
 	// result is available.
 	Result() Result
-
+	// Statements returns the parsed statements of the query.
 	Statements() Statements
+	// Stats returns statistics about the lifetime of the query.
+	Stats() *stats.TimerGroup
 }
 
 type query struct {
@@ -139,6 +143,7 @@ type query struct {
 	stmts  Statements // Statements of the parsed query.
 	result Result     // Result of the evaluated query.
 	done   chan bool
+	stats  *stats.TimerGroup
 
 	ng *Engine // The engine against which the query is executed.
 }
@@ -147,6 +152,12 @@ func (q *query) Statements() Statements {
 	return q.stmts
 }
 
+func (q *query) Stats() *stats.TimerGroup {
+	return q.stats
+}
+
+// Exec starts the execution of the query and returns. On finishing the execution
+// true is sent to the returned channel.
 func (q *query) Exec() <-chan bool {
 	go func() {
 		q.result = q.ng.exec(q)
@@ -157,6 +168,8 @@ func (q *query) Exec() <-chan bool {
 	return q.done
 }
 
+// Result retrieves the result from an executed query. It blocks as long as
+// the execution is running.
 func (q *query) Result() Result {
 	if q.done == nil {
 		return Result{Err: errors.New("query execution not started")}
@@ -166,25 +179,44 @@ func (q *query) Result() Result {
 }
 
 type (
-	AlertHandler  func(*AlertStmt) error
+	// AlertHandlers can be registered with an engine and are called on
+	// each executed alert statement.
+	AlertHandler func(*AlertStmt) error
+	// RecordHandlers can be registered with an engine and are called on
+	// each executed record statement.
 	RecordHandler func(*RecordStmt) error
 )
 
+// Engine handles the liftetime of queries from beginning to end. It is connected
+// to a storage.
 type Engine struct {
 	sync.RWMutex
 
 	storage local.Storage
 
+	// The base context for all queries and its cancellation function.
+	baseCtx       context.Context
+	cancelQueries func()
+
 	alertHandlers  map[string]AlertHandler
 	recordHandlers map[string]RecordHandler
 }
 
+// NewEngine returns a new engine.
 func NewEngine(storage local.Storage) *Engine {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
 		storage:        storage,
+		baseCtx:        ctx,
+		cancelQueries:  cancel,
 		alertHandlers:  make(map[string]AlertHandler),
 		recordHandlers: make(map[string]RecordHandler),
 	}
+}
+
+// Stop the engine and cancel all running queries.
+func (ng *Engine) Stop() {
+	ng.cancelQueries()
 }
 
 // recover is the handler that turns panics into returns from the top level of Parse.
@@ -199,6 +231,7 @@ func (ng *Engine) recover(errp *error) {
 	return
 }
 
+// QueryRules returns a query of rule statements.
 func (ng *Engine) QueryRules(qs string) (Query, error) {
 	stmts, err := Parse("query", qs)
 	if err != nil {
@@ -209,14 +242,27 @@ func (ng *Engine) QueryRules(qs string) (Query, error) {
 		stmts: stmts,
 		ng:    ng,
 		done:  make(chan bool, 2),
+		stats: stats.NewTimerGroup(),
 	}
 	return query, nil
 }
 
+// QueryRulesFromFile reads a file and returns a query of rule statements it contains.
+func (ng *Engine) QueryRulesFromFile(filename string) (Query, error) {
+	content, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	return ng.QueryRules(string(content))
+}
+
+// QueryInstant returns an evaluation query for the given expression at the given time.
 func (ng *Engine) QueryInstant(qs string, ts clientmodel.Timestamp) (Query, error) {
 	return ng.QueryRange(qs, ts, ts, 0)
 }
 
+// QueryRange returns an evaluation query for the given time range and with
+// the resolution set by the interval.
 func (ng *Engine) QueryRange(qs string, start, end clientmodel.Timestamp, interval time.Duration) (Query, error) {
 	stmts, err := Parse("query", "EVAL "+qs)
 	if err != nil {
@@ -236,98 +282,140 @@ func (ng *Engine) QueryRange(qs string, start, end clientmodel.Timestamp, interv
 		stmts: stmts,
 		ng:    ng,
 		done:  make(chan bool, 2),
+		stats: stats.NewTimerGroup(),
 	}
 	return query, nil
 }
 
-func (ng *Engine) QueryFromFile(filename string) (Query, error) {
-	content, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	return ng.QueryRules(string(content))
-}
-
+// errorf raises an error and terminates the execution stack of the engine.
 func (ng *Engine) errorf(format string, args ...interface{}) {
 	panic(fmt.Errorf(format, args...))
 }
 
+// exec executes all statements in the query. For evaluation statements only
+// one statement per query is allowed, after which the execution returns.
 func (ng *Engine) exec(q *query) (res Result) {
 	defer ng.recover(&res.Err)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ng.baseCtx, *defaultQueryTimeout)
+	defer cancel() // Cancel in case an error is raised.
+
+	q.stats.GetTimer(stats.TotalEvalTime).Start()
+	defer q.stats.GetTimer(stats.TotalEvalTime).Stop()
 
 	for _, stmt := range q.stmts {
 		switch s := stmt.(type) {
 		case *AlertStmt:
 			for _, h := range ng.alertHandlers {
-				err := h(s)
-				if err != nil {
-					return Result{Err: err}
+				select {
+				case <-ctx.Done():
+					return Result{Err: ctx.Err()}
+				default:
+					err := h(s)
+					if err != nil {
+						return Result{Err: err}
+					}
 				}
 			}
 		case *RecordStmt:
 			for _, h := range ng.recordHandlers {
-				err := h(s)
-				if err != nil {
-					return Result{Err: err}
+				select {
+				case <-ctx.Done():
+					return Result{Err: ctx.Err()}
+				default:
+					err := h(s)
+					if err != nil {
+						return Result{Err: err}
+					}
 				}
 			}
 		case *EvalStmt:
 			// Only one execution statement per query is allowed.
-			analyzer := ng.analyzer(s.Expr, s.Start, s.End, ctx)
-			analyzer.analyze()
+			return ng.execEvalStmt(q, s, ctx)
 
-			closer, err := analyzer.prepare()
-			if err != nil {
-				return Result{Err: err}
-			}
-			defer closer.Close()
-
-			// Instant evaluation.
-			if s.Start == s.End {
-				evaluator := ng.evaluator(s.Start, ctx)
-				val := evaluator.eval(s.Expr)
-				return Result{Value: val}
-			}
-
-			// Range evaluation.
-			sampleStreams := make(map[clientmodel.Fingerprint]*SampleStream)
-			for ts := s.Start; !ts.After(s.End); ts = ts.Add(s.Interval) {
-
-				evaluator := ng.evaluator(ts, ctx)
-				vector := evaluator.evalVector(s.Expr)
-
-				for _, sample := range vector {
-					samplePair := metric.SamplePair{
-						Value:     sample.Value,
-						Timestamp: sample.Timestamp,
-					}
-					fp := sample.Metric.Metric.Fingerprint()
-					if sampleStreams[fp] == nil {
-						sampleStreams[fp] = &SampleStream{
-							Metric: sample.Metric,
-							Values: metric.Values{samplePair},
-						}
-					} else {
-						sampleStreams[fp].Values = append(sampleStreams[fp].Values, samplePair)
-					}
-				}
-			}
-
-			matrix := Matrix{}
-			for _, sampleStream := range sampleStreams {
-				matrix = append(matrix, sampleStream)
-			}
-
-			sort.Sort(matrix)
-
-			return Result{Value: matrix}
+		default:
+			ng.errorf("statement of unknown type %T", stmt)
 		}
 	}
 	return
 }
 
+// execEvalStmt evaluates the expression of an evaluation statement for the given time range.
+func (ng *Engine) execEvalStmt(query *query, s *EvalStmt, ctx context.Context) Result {
+	prepareTimer := query.stats.GetTimer(stats.TotalQueryPreparationTime).Start()
+	analyzeTimer := query.stats.GetTimer(stats.QueryAnalysisTime).Start()
+
+	// Only one execution statement per query is allowed.
+	analyzer := ng.analyzer(s.Expr, s.Start, s.End, ctx)
+	analyzer.analyze()
+	analyzeTimer.Stop()
+
+	preloadTimer := query.stats.GetTimer(stats.PreloadTime).Start()
+	closer, err := analyzer.prepare()
+	if err != nil {
+		return Result{Err: err}
+	}
+	defer closer.Close()
+
+	preloadTimer.Stop()
+	prepareTimer.Stop()
+
+	evalTimer := query.stats.GetTimer(stats.InnerEvalTime).Start()
+	// Instant evaluation.
+	if s.Start == s.End {
+		evaluator := ng.evaluator(s.Start, ctx)
+		val := evaluator.eval(s.Expr)
+
+		evalTimer.Stop()
+		return Result{Value: val}
+	}
+
+	// Range evaluation.
+	sampleStreams := make(map[clientmodel.Fingerprint]*SampleStream)
+	for ts := s.Start; !ts.After(s.End); ts = ts.Add(s.Interval) {
+
+		evaluator := ng.evaluator(ts, ctx)
+		vector := evaluator.evalVector(s.Expr)
+
+		for _, sample := range vector {
+			select {
+			case <-ctx.Done():
+				return Result{Err: ctx.Err()}
+
+			default:
+				samplePair := metric.SamplePair{
+					Value:     sample.Value,
+					Timestamp: sample.Timestamp,
+				}
+				fp := sample.Metric.Metric.Fingerprint()
+				if sampleStreams[fp] == nil {
+					sampleStreams[fp] = &SampleStream{
+						Metric: sample.Metric,
+						Values: metric.Values{samplePair},
+					}
+				} else {
+					sampleStreams[fp].Values = append(sampleStreams[fp].Values, samplePair)
+				}
+			}
+		}
+	}
+	evalTimer.Stop()
+
+	appendTimer := query.stats.GetTimer(stats.ResultAppendTime).Start()
+	matrix := Matrix{}
+	for _, sampleStream := range sampleStreams {
+		matrix = append(matrix, sampleStream)
+	}
+	appendTimer.Stop()
+
+	sortTimer := query.stats.GetTimer(stats.ResultSortTime).Start()
+	sort.Sort(matrix)
+	sortTimer.Stop()
+
+	return Result{Value: matrix}
+}
+
+// analyzer returns a new Analyzer intialized with the engine and bound to the context.
 func (ng *Engine) analyzer(expr Expr, start, end clientmodel.Timestamp, ctx context.Context) *Analyzer {
 	a := &Analyzer{
 		ng:    ng,
@@ -339,6 +427,7 @@ func (ng *Engine) analyzer(expr Expr, start, end clientmodel.Timestamp, ctx cont
 	return a
 }
 
+// evaluator returns a new evaluator initialized with the engine and bound to the context.
 func (ng *Engine) evaluator(ts clientmodel.Timestamp, ctx context.Context) *evaluator {
 	return &evaluator{
 		ng:        ng,
@@ -728,35 +817,17 @@ func (ev *evaluator) vectorElemBinop(op itemType, lhs, rhs clientmodel.SampleVal
 		}
 		return clientmodel.SampleValue(math.Inf(int(rhs))), true
 	case itemEQL:
-		if lhs == rhs {
-			return lhs, true
-		}
-		return 0, false
+		return lhs, lhs == rhs
 	case itemNEQ:
-		if lhs != rhs {
-			return lhs, true
-		}
-		return 0, false
+		return lhs, lhs != rhs
 	case itemGTR:
-		if lhs > rhs {
-			return lhs, true
-		}
-		return 0, false
+		return lhs, lhs > rhs
 	case itemLSS:
-		if lhs < rhs {
-			return lhs, true
-		}
-		return 0, false
+		return lhs, lhs < rhs
 	case itemGTE:
-		if lhs >= rhs {
-			return lhs, true
-		}
-		return 0, false
+		return lhs, lhs >= rhs
 	case itemLTE:
-		if lhs <= rhs {
-			return lhs, true
-		}
-		return 0, false
+		return lhs, lhs <= rhs
 	default:
 		ev.ng.errorf("operator of type %q not allowed for vector elements", op)
 	}
@@ -855,24 +926,28 @@ func (ev *evaluator) aggregation(op itemType, grouping clientmodel.LabelNames, k
 	return resultVector
 }
 
+// RegisterAlertHandler registers a new alert handler of the given name.
 func (ng *Engine) RegisterAlertHandler(name string, h AlertHandler) {
 	ng.Lock()
 	ng.alertHandlers[name] = h
 	ng.Unlock()
 }
 
+// RegisterRecordHandler registers a new record handler of the given name.
 func (ng *Engine) RegisterRecordHandler(name string, h RecordHandler) {
 	ng.Lock()
 	ng.recordHandlers[name] = h
 	ng.Unlock()
 }
 
+// UnregisterAlertHandler removes the alert handler with the given name.
 func (ng *Engine) UnregisterAlertHandler(name string) {
 	ng.Lock()
 	delete(ng.alertHandlers, name)
 	ng.Unlock()
 }
 
+// UnregisterRecordHandler removes the record handler with the given name.
 func (ng *Engine) UnregisterRecordHandler(name string) {
 	ng.Lock()
 	delete(ng.recordHandlers, name)
@@ -898,8 +973,7 @@ func shouldDropMetricName(op itemType) bool {
 }
 
 // resultMetric returns the metric for the given sample(s) based on the vector
-// binary operation and the matching options. If a label that has to be included is set on
-// both sides an error is returned.
+// binary operation and the matching options.
 func resultMetric(op itemType, ls, rs *Sample, matching *VectorMatching) clientmodel.COWMetric {
 	if len(matching.On) == 0 || op == itemLOR || op == itemLAND {
 		if shouldDropMetricName(op) {

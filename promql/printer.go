@@ -150,13 +150,16 @@ func (node *EvalStmt) String() string {
 }
 
 func (node *AlertStmt) String() string {
-	s := fmt.Sprintf("ALERT %s\n\tIF %s", node.Name, node.Expr)
+	s := fmt.Sprintf("ALERT %s", node.Name)
+	s += fmt.Sprintf("\n\tIF %s", node.Expr)
 	if node.Duration > 0 {
 		s += fmt.Sprintf("\n\tFOR %s", node.Duration)
 	}
-	s += fmt.Sprintf("\n\tWITH %s", node.Labels)
+	if len(node.Labels) > 0 {
+		s += fmt.Sprintf("\n\tWITH %s", node.Labels)
+	}
 	s += fmt.Sprintf("\n\tSUMMARY %s", node.Summary)
-	s += fmt.Sprintf("\n\tDESCRIPTION", node.Description)
+	s += fmt.Sprintf("\n\tDESCRIPTION %s", node.Description)
 	return s
 }
 
@@ -192,13 +195,11 @@ func (node *VectorSelector) String() string {
 		}
 	}
 
-	switch len(labelStrings) {
-	case 0:
+	if len(labelStrings) == 0 {
 		return string(metricName)
-	default:
-		sort.Strings(labelStrings)
-		return fmt.Sprintf("%s{%s}", metricName, strings.Join(labelStrings, ","))
 	}
+	sort.Strings(labelStrings)
+	return fmt.Sprintf("%s{%s}", metricName, strings.Join(labelStrings, ","))
 }
 
 func (node *AggregateExpr) String() string {
