@@ -2,6 +2,7 @@ package promql
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -208,7 +209,7 @@ func (t itemType) String() string {
 	if s, ok := itemTypeStr[t]; ok {
 		return s
 	}
-	return fmt.Sprint(t)
+	return reflect.TypeOf(t).Name()
 }
 
 const eof = -1

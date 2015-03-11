@@ -11,7 +11,7 @@ import (
 // Node is a generic interface for all nodes in an AST.
 type Node interface {
 	String() string
-	// NodeTreeToDotGraph() string
+	DotGraph() string
 }
 
 // Statement is a generic interface for all statements.

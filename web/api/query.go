@@ -170,7 +170,6 @@ func (serv MetricsService) QueryRange(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, errorToJSON(err))
 		return
 	}
-	// TODO(fabxc): check query type.
 	query.Exec()
 	matrix, err := query.Result().Matrix()
 	if err != nil {

@@ -2,6 +2,7 @@ package promql
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -50,100 +51,6 @@ func (matrix Matrix) String() string {
 	sort.Strings(metricStrings)
 	return strings.Join(metricStrings, "\n")
 }
-
-// // NodeTreeToDotGraph returns a DOT representation of the scalar literal.
-// func (node *NumberLiteral) NodeTreeToDotGraph() string {
-// 	return fmt.Sprintf("%#p[label=\"%v\"];\n", node, node.N)
-// }
-
-// func (node *UnaryExpr) NodeTreeToDotGraph() string {
-// 	nodeAddr := reflect.ValueOf(node).Pointer()
-// 	graph := fmt.Sprintf(
-// 		`
-// 		%x[label="%s"];
-// 		%x -> %x;
-// 		%s
-// 		%s
-// 	}`,
-// 		nodeAddr, node.Op,
-// 		nodeAddr, reflect.ValueOf(node.Expr).Pointer(),
-// 		node.Expr.NodeTreeToDotGraph(),
-// 	)
-// 	return graph
-// }
-
-// func (node *ParenExpr) NodeTreeToDotGraph() string {
-// 	return node.Expr.NodeTreeToDotGraph()
-// }
-
-// func functionArgsToDotGraph(node Node, args []Node) string {
-// 	graph := ""
-// 	for _, arg := range args {
-// 		graph += fmt.Sprintf("%x -> %x;\n", reflect.ValueOf(node).Pointer(), reflect.ValueOf(arg).Pointer())
-// 	}
-// 	for _, arg := range args {
-// 		graph += arg.NodeTreeToDotGraph()
-// 	}
-// 	return graph
-// }
-
-// // NodeTreeToDotGraph returns a DOT representation of the vector selector.
-// func (node *VectorSelector) NodeTreeToDotGraph() string {
-// 	return fmt.Sprintf("%#p[label=\"%s\"];\n", node, node)
-// }
-
-// // NodeTreeToDotGraph returns a DOT representation of the function call.
-// func (node *Call) NodeTreeToDotGraph() string {
-// 	graph := fmt.Sprintf("%#p[label=\"%s\"];\n", node, node.Func.Name)
-// 	graph += functionArgsToDotGraph(node, node.args)
-// 	return graph
-// }
-
-// // NodeTreeToDotGraph returns a DOT representation of the vector aggregation.
-// func (node *AggregateExpr) NodeTreeToDotGraph() string {
-// 	groupByStrings := make([]string, 0, len(node.Grouping))
-// 	for _, label := range node.Grouping {
-// 		groupByStrings = append(groupByStrings, string(label))
-// 	}
-
-// 	graph := fmt.Sprintf("%#p[label=\"%s BY (%s)\"]\n",
-// 		node,
-// 		node.Op,
-// 		strings.Join(groupByStrings, ", "))
-// 	graph += fmt.Sprintf("%#p -> %x;\n", node, reflect.ValueOf(node.Expr).Pointer())
-// 	graph += node.vector.NodeTreeToDotGraph()
-// 	return graph
-// }
-
-// // NodeTreeToDotGraph returns a DOT representation of the expression.
-// func (node *BinaryExpr) NodeTreeToDotGraph() string {
-// 	nodeAddr := reflect.ValueOf(node).Pointer()
-// 	graph := fmt.Sprintf(
-// 		`
-// 		%x[label="%s"];
-// 		%x -> %x;
-// 		%x -> %x;
-// 		%s
-// 		%s
-// 	}`,
-// 		nodeAddr, node.Op,
-// 		nodeAddr, reflect.ValueOf(node.lhs).Pointer(),
-// 		nodeAddr, reflect.ValueOf(node.rhs).Pointer(),
-// 		node.LHS.NodeTreeToDotGraph(),
-// 		node.RHS.NodeTreeToDotGraph(),
-// 	)
-// 	return graph
-// }
-
-// // NodeTreeToDotGraph returns a DOT representation of the matrix selector.
-// func (node *MatrixSelector) NodeTreeToDotGraph() string {
-// 	return fmt.Sprintf("%#p[label=\"%s\"];\n", node, node)
-// }
-
-// // NodeTreeToDotGraph returns a DOT representation of the string literal.
-// func (node *StringLiteral) NodeTreeToDotGraph() string {
-// 	return fmt.Sprintf("%#p[label=\"'%q'\"];\n", node, node.str)
-// }
 
 func (node *EvalStmt) String() string {
 	return "EVAL " + node.Expr.String()
@@ -221,4 +128,143 @@ func (node *MatrixSelector) String() string {
 
 func (node *StringLiteral) String() string {
 	return fmt.Sprintf("%q", node.S)
+}
+
+// DotGraph returns a DOT representation of the number literal.
+func (node *NumberLiteral) DotGraph() string {
+	return fmt.Sprintf("%#p[label=\"%v\"];\n", node, node.N)
+}
+
+// DotGraph returns a DOT representation of the unary expression.
+func (node *UnaryExpr) DotGraph() string {
+	nodeAddr := reflect.ValueOf(node).Pointer()
+	graph := fmt.Sprintf(
+		`
+		%x[label="%s"];
+		%x -> %x;
+		%s
+		%s
+	}`,
+		nodeAddr, node.Op,
+		nodeAddr, reflect.ValueOf(node.Expr).Pointer(),
+		node.Expr.DotGraph(),
+	)
+	return graph
+}
+
+// DotGraph returns a DOT representation of the scalar literal.
+func (node *ParenExpr) DotGraph() string {
+	return node.Expr.DotGraph()
+}
+
+func functionArgsToDotGraph(node Node, args []Expr) string {
+	graph := ""
+	for _, arg := range args {
+		graph += fmt.Sprintf("%x -> %x;\n", reflect.ValueOf(node).Pointer(), reflect.ValueOf(arg).Pointer())
+	}
+	for _, arg := range args {
+		graph += arg.DotGraph()
+	}
+	return graph
+}
+
+// DotGraph returns a DOT representation of the vector selector.
+func (node *VectorSelector) DotGraph() string {
+	return fmt.Sprintf("%#p[label=\"%s\"];\n", node, node)
+}
+
+// DotGraph returns a DOT representation of the function call.
+func (node *Call) DotGraph() string {
+	graph := fmt.Sprintf("%#p[label=\"%s\"];\n", node, node.Func.Name)
+	graph += functionArgsToDotGraph(node, node.Args)
+	return graph
+}
+
+// DotGraph returns a DOT representation of the vector aggregation.
+func (node *AggregateExpr) DotGraph() string {
+	groupByStrings := make([]string, 0, len(node.Grouping))
+	for _, label := range node.Grouping {
+		groupByStrings = append(groupByStrings, string(label))
+	}
+
+	graph := fmt.Sprintf("%#p[label=\"%s BY (%s)\"]\n",
+		node,
+		node.Op,
+		strings.Join(groupByStrings, ", "))
+	graph += fmt.Sprintf("%#p -> %x;\n", node, reflect.ValueOf(node.Expr).Pointer())
+	graph += node.Expr.DotGraph()
+	return graph
+}
+
+// DotGraph returns a DOT representation of the expression.
+func (node *BinaryExpr) DotGraph() string {
+	nodeAddr := reflect.ValueOf(node).Pointer()
+	graph := fmt.Sprintf(
+		`
+		%x[label="%s"];
+		%x -> %x;
+		%x -> %x;
+		%s
+		%s
+	}`,
+		nodeAddr, node.Op,
+		nodeAddr, reflect.ValueOf(node.LHS).Pointer(),
+		nodeAddr, reflect.ValueOf(node.RHS).Pointer(),
+		node.LHS.DotGraph(),
+		node.RHS.DotGraph(),
+	)
+	return graph
+}
+
+// DotGraph returns a DOT representation of the matrix selector.
+func (node *MatrixSelector) DotGraph() string {
+	return fmt.Sprintf("%#p[label=\"%s\"];\n", node, node)
+}
+
+// DotGraph returns a DOT representation of the string literal.
+func (node *StringLiteral) DotGraph() string {
+	return fmt.Sprintf("%#p[label=\"'%q'\"];\n", node, node.S)
+}
+
+// DotGraph returns a DOT representation of the alert statement.
+func (node *AlertStmt) DotGraph() string {
+	graph := fmt.Sprintf(
+		`digraph "Alert Statement" {
+	  %#p[shape="box",label="ALERT %s IF FOR %s"];
+		%#p -> %x;
+		%s
+	}`,
+		node, node.Name, utility.DurationToString(node.Duration),
+		node, reflect.ValueOf(node.Expr).Pointer(),
+		node.Expr.DotGraph(),
+	)
+	return graph
+}
+
+// DotGraph returns a DOT representation of the record statement.
+func (node *RecordStmt) DotGraph() string {
+	graph := fmt.Sprintf(
+		`%#p[shape="box",label="%s = "];
+		%#p -> %x;
+		%s
+	}`,
+		node, node.Name,
+		node, reflect.ValueOf(node.Expr).Pointer(),
+		node.Expr.DotGraph(),
+	)
+	return graph
+}
+
+// DotGraph returns a DOT representation of the eval statement.
+func (node *EvalStmt) DotGraph() string {
+	graph := fmt.Sprintf(
+		`%#p[shape="box",label="[%d:%s:%d]";
+		%#p -> %x;
+		%s
+	}`,
+		node, node.Start, node.End, node.Interval,
+		node, reflect.ValueOf(node.Expr).Pointer(),
+		node.Expr.DotGraph(),
+	)
+	return graph
 }

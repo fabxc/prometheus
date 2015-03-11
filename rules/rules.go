@@ -31,8 +31,8 @@ type Rule interface {
 	EvalRaw(clientmodel.Timestamp, *promql.Engine) (promql.Vector, error)
 	// Eval evaluates the rule, including any associated recording or alerting actions.
 	Eval(clientmodel.Timestamp, *promql.Engine) (promql.Vector, error)
-	// ToDotGraph returns a Graphviz dot graph of the rule.
-	ToDotGraph() string
+	// DotGraph returns a Graphviz dot graph of the rule.
+	DotGraph() string
 	// String returns a human-readable string representation of the rule.
 	String() string
 	// HTMLSnippet returns a human-readable string representation of the rule,

@@ -194,8 +194,8 @@ func (rule *AlertingRule) Eval(timestamp clientmodel.Timestamp, engine *promql.E
 	return vector, nil
 }
 
-// ToDotGraph returns the text representation of a dot graph.
-func (rule *AlertingRule) ToDotGraph() string {
+// DotGraph returns the text representation of a dot graph.
+func (rule *AlertingRule) DotGraph() string {
 	graph := fmt.Sprintf(
 		`digraph "Rules" {
 	  %#p[shape="box",label="ALERT %s IF FOR %s"];
@@ -204,7 +204,7 @@ func (rule *AlertingRule) ToDotGraph() string {
 	}`,
 		&rule, rule.name, utility.DurationToString(rule.holdDuration),
 		&rule, reflect.ValueOf(rule.Vector).Pointer(),
-	// rule.Vector.NodeTreeToDotGraph())
+		rule.Vector.DotGraph(),
 	)
 	return graph
 }

@@ -67,8 +67,8 @@ func (rule RecordingRule) Eval(timestamp clientmodel.Timestamp, engine *promql.E
 	return vector, nil
 }
 
-// ToDotGraph returns the text representation of a dot graph.
-func (rule RecordingRule) ToDotGraph() string {
+// DotGraph returns the text representation of a dot graph.
+func (rule RecordingRule) DotGraph() string {
 	graph := fmt.Sprintf(
 		`digraph "Rules" {
 	  %#p[shape="box",label="%s = "];
@@ -77,7 +77,7 @@ func (rule RecordingRule) ToDotGraph() string {
 	}`,
 		&rule, rule.name,
 		&rule, reflect.ValueOf(rule.vector).Pointer(),
-		// rule.vector.NodeTreeToDotGraph(),
+		rule.vector.DotGraph(),
 	)
 	return graph
 }
