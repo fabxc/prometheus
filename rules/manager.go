@@ -264,7 +264,7 @@ func (m *ruleManager) runIteration() {
 	wg.Wait()
 }
 
-func (m *ruleManager) AddAlertRule(r *promql.AlertStmt) error {
+func (m *ruleManager) AddAlertRule(ctx context.Context, r *promql.AlertStmt) error {
 	rule := NewAlertingRule(r.Name, r.Expr, r.Duration, r.Labels, r.Summary, r.Description)
 
 	m.Lock()
@@ -273,7 +273,7 @@ func (m *ruleManager) AddAlertRule(r *promql.AlertStmt) error {
 	return nil
 }
 
-func (m *ruleManager) AddRecordingRule(r *promql.RecordStmt) error {
+func (m *ruleManager) AddRecordingRule(ctx context.Context, r *promql.RecordStmt) error {
 	rule := &RecordingRule{r.Name, r.Expr, r.Labels, r.Permanent}
 
 	m.Lock()

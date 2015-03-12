@@ -15,7 +15,6 @@ package promql
 
 import (
 	"container/heap"
-	// "fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -117,40 +116,6 @@ func funcRate(ev *evaluator, args []Expr) Value {
 		vector[i].Value /= clientmodel.SampleValue(interval / time.Second)
 	}
 	return vector
-}
-
-type vectorByValueHeap Vector
-
-func (s vectorByValueHeap) Len() int {
-	return len(s)
-}
-
-func (s vectorByValueHeap) Less(i, j int) bool {
-	return s[i].Value < s[j].Value
-}
-
-func (s vectorByValueHeap) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
-func (s *vectorByValueHeap) Push(x interface{}) {
-	*s = append(*s, x.(*Sample))
-}
-
-func (s *vectorByValueHeap) Pop() interface{} {
-	old := *s
-	n := len(old)
-	el := old[n-1]
-	*s = old[0 : n-1]
-	return el
-}
-
-type reverseHeap struct {
-	heap.Interface
-}
-
-func (s reverseHeap) Less(i, j int) bool {
-	return s.Interface.Less(j, i)
 }
 
 // === sort(node VectorNode) Vector ===
@@ -631,4 +596,38 @@ var functions = map[string]*Function{
 func GetFunction(name string) (*Function, bool) {
 	function, ok := functions[name]
 	return function, ok
+}
+
+type vectorByValueHeap Vector
+
+func (s vectorByValueHeap) Len() int {
+	return len(s)
+}
+
+func (s vectorByValueHeap) Less(i, j int) bool {
+	return s[i].Value < s[j].Value
+}
+
+func (s vectorByValueHeap) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s *vectorByValueHeap) Push(x interface{}) {
+	*s = append(*s, x.(*Sample))
+}
+
+func (s *vectorByValueHeap) Pop() interface{} {
+	old := *s
+	n := len(old)
+	el := old[n-1]
+	*s = old[0 : n-1]
+	return el
+}
+
+type reverseHeap struct {
+	heap.Interface
+}
+
+func (s reverseHeap) Less(i, j int) bool {
+	return s.Interface.Less(j, i)
 }

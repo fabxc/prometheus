@@ -15,20 +15,16 @@ var tests = []struct {
 	{
 		input:    ";",
 		expected: []item{{itemSemicolon, 0, ";"}},
-	},
-	{
+	}, {
 		input:    ",",
 		expected: []item{{itemComma, 0, ","}},
-	},
-	{
+	}, {
 		input:    "()",
 		expected: []item{{itemLeftParen, 0, `(`}, {itemRightParen, 1, `)`}},
-	},
-	{
+	}, {
 		input:    "{}",
 		expected: []item{{itemLeftBrace, 0, `{`}, {itemRightBrace, 1, `}`}},
-	},
-	{
+	}, {
 		input: "[5m]",
 		expected: []item{
 			{itemLeftBracket, 0, `[`},
@@ -40,56 +36,43 @@ var tests = []struct {
 	{
 		input:    "1",
 		expected: []item{{itemNumber, 0, "1"}},
-	},
-	{
+	}, {
 		input:    "4.23",
 		expected: []item{{itemNumber, 0, "4.23"}},
-	},
-	{
+	}, {
 		input:    ".3",
 		expected: []item{{itemNumber, 0, ".3"}},
-	},
-	{
+	}, {
 		input:    "5.",
 		expected: []item{{itemNumber, 0, "5."}},
-	},
-	{
+	}, {
 		input:    "NaN",
 		expected: []item{{itemNumber, 0, "NaN"}},
-	},
-	{
+	}, {
 		input:    "nAN",
 		expected: []item{{itemNumber, 0, "nAN"}},
-	},
-	{
+	}, {
 		input:    "NaN 123",
 		expected: []item{{itemNumber, 0, "NaN"}, {itemNumber, 4, "123"}},
-	},
-	{
+	}, {
 		input:    "iNf",
 		expected: []item{{itemNumber, 0, "iNf"}},
-	},
-	{
+	}, {
 		input:    "Inf",
 		expected: []item{{itemNumber, 0, "Inf"}},
-	},
-	{
+	}, {
 		input:    "+Inf",
 		expected: []item{{itemNumber, 0, "+Inf"}},
-	},
-	{
+	}, {
 		input:    "+Inf 123",
 		expected: []item{{itemNumber, 0, "+Inf"}, {itemNumber, 5, "123"}},
-	},
-	{
+	}, {
 		input:    "-Inf",
 		expected: []item{{itemNumber, 0, "-Inf"}},
-	},
-	{
+	}, {
 		input:    "-Inf 123",
 		expected: []item{{itemNumber, 0, "-Inf"}, {itemNumber, 5, "123"}},
-	},
-	{
+	}, {
 		input:    "0x123",
 		expected: []item{{itemNumber, 0, "0x123"}},
 	},
@@ -97,20 +80,16 @@ var tests = []struct {
 	{
 		input:    "5s",
 		expected: []item{{itemDuration, 0, "5s"}},
-	},
-	{
+	}, {
 		input:    "123m",
 		expected: []item{{itemDuration, 0, "123m"}},
-	},
-	{
+	}, {
 		input:    "1h",
 		expected: []item{{itemDuration, 0, "1h"}},
-	},
-	{
+	}, {
 		input:    "3w",
 		expected: []item{{itemDuration, 0, "3w"}},
-	},
-	{
+	}, {
 		input:    "1y",
 		expected: []item{{itemDuration, 0, "1y"}},
 	},
@@ -118,12 +97,10 @@ var tests = []struct {
 	{
 		input:    "abc",
 		expected: []item{{itemIdentifier, 0, "abc"}},
-	},
-	{
+	}, {
 		input:    "a:bc",
 		expected: []item{{itemMetricIdentifier, 0, "a:bc"}},
-	},
-	{
+	}, {
 		input:    "abc d",
 		expected: []item{{itemIdentifier, 0, "abc"}, {itemIdentifier, 4, "d"}},
 	},
@@ -131,8 +108,7 @@ var tests = []struct {
 	{
 		input:    "/* some comment */",
 		expected: []item{{itemComment, 0, "/* some comment */"}},
-	},
-	{
+	}, {
 		input: "1 + /* some\n comment */ 1",
 		expected: []item{
 			{itemNumber, 0, "1"},
@@ -140,12 +116,10 @@ var tests = []struct {
 			{itemComment, 4, "/* some\n comment */"},
 			{itemNumber, 24, "1"},
 		},
-	},
-	{
+	}, {
 		input:    "// some comment",
 		expected: []item{{itemComment, 0, "// some comment"}},
-	},
-	{
+	}, {
 		input: "5 // 1+1\n5",
 		expected: []item{
 			{itemNumber, 0, "5"},
@@ -157,52 +131,40 @@ var tests = []struct {
 	{
 		input:    `==`,
 		expected: []item{{itemEQL, 0, `==`}},
-	},
-	{
+	}, {
 		input:    `!=`,
 		expected: []item{{itemNEQ, 0, `!=`}},
-	},
-	{
+	}, {
 		input:    `<`,
 		expected: []item{{itemLSS, 0, `<`}},
-	},
-	{
+	}, {
 		input:    `>`,
 		expected: []item{{itemGTR, 0, `>`}},
-	},
-	{
+	}, {
 		input:    `>=`,
 		expected: []item{{itemGTE, 0, `>=`}},
-	},
-	{
+	}, {
 		input:    `<=`,
 		expected: []item{{itemLTE, 0, `<=`}},
-	},
-	{
+	}, {
 		input:    `+`,
 		expected: []item{{itemADD, 0, `+`}},
-	},
-	{
+	}, {
 		input:    `-`,
 		expected: []item{{itemSUB, 0, `-`}},
-	},
-	{
+	}, {
 		input:    `*`,
 		expected: []item{{itemMUL, 0, `*`}},
-	},
-	{
+	}, {
 		input:    `/`,
 		expected: []item{{itemQUO, 0, `/`}},
-	},
-	{
+	}, {
 		input:    `%`,
 		expected: []item{{itemREM, 0, `%`}},
-	},
-	{
+	}, {
 		input:    `AND`,
 		expected: []item{{itemLAND, 0, `AND`}},
-	},
-	{
+	}, {
 		input:    `or`,
 		expected: []item{{itemLOR, 0, `or`}},
 	},
@@ -210,20 +172,16 @@ var tests = []struct {
 	{
 		input:    `sum`,
 		expected: []item{{itemSum, 0, `sum`}},
-	},
-	{
+	}, {
 		input:    `AVG`,
 		expected: []item{{itemAvg, 0, `AVG`}},
-	},
-	{
+	}, {
 		input:    `MAX`,
 		expected: []item{{itemMax, 0, `MAX`}},
-	},
-	{
+	}, {
 		input:    `min`,
 		expected: []item{{itemMin, 0, `min`}},
-	},
-	{
+	}, {
 		input:    `count`,
 		expected: []item{{itemCount, 0, `count`}},
 	},
@@ -231,52 +189,40 @@ var tests = []struct {
 	{
 		input:    "alert",
 		expected: []item{{itemAlert, 0, "alert"}},
-	},
-	{
+	}, {
 		input:    "keeping_extra",
 		expected: []item{{itemKeepingExtra, 0, "keeping_extra"}},
-	},
-	{
+	}, {
 		input:    "if",
 		expected: []item{{itemIf, 0, "if"}},
-	},
-	{
+	}, {
 		input:    "for",
 		expected: []item{{itemFor, 0, "for"}},
-	},
-	{
+	}, {
 		input:    "with",
 		expected: []item{{itemWith, 0, "with"}},
-	},
-	{
+	}, {
 		input:    "description",
 		expected: []item{{itemDescription, 0, "description"}},
-	},
-	{
+	}, {
 		input:    "summary",
 		expected: []item{{itemSummary, 0, "summary"}},
-	},
-	{
+	}, {
 		input:    "permanent",
 		expected: []item{{itemPermanent, 0, "permanent"}},
-	},
-	{
+	}, {
 		input:    "offset",
 		expected: []item{{itemOffset, 0, "offset"}},
-	},
-	{
+	}, {
 		input:    "by",
 		expected: []item{{itemBy, 0, "by"}},
-	},
-	{
+	}, {
 		input:    "on",
 		expected: []item{{itemOn, 0, "on"}},
-	},
-	{
+	}, {
 		input:    "group_left",
 		expected: []item{{itemGroupLeft, 0, "group_left"}},
-	},
-	{
+	}, {
 		input:    "group_right",
 		expected: []item{{itemGroupRight, 0, "group_right"}},
 	},
@@ -290,8 +236,7 @@ var tests = []struct {
 			{itemString, 5, `"bar"`},
 			{itemRightBrace, 10, `}`},
 		},
-	},
-	{
+	}, {
 		input: `{NaN	!= "bar" }`,
 		expected: []item{
 			{itemLeftBrace, 0, `{`},
@@ -300,8 +245,7 @@ var tests = []struct {
 			{itemString, 8, `"bar"`},
 			{itemRightBrace, 14, `}`},
 		},
-	},
-	{
+	}, {
 		input: `{alert=~"bar" }`,
 		expected: []item{
 			{itemLeftBrace, 0, `{`},
@@ -310,8 +254,7 @@ var tests = []struct {
 			{itemString, 8, `"bar"`},
 			{itemRightBrace, 14, `}`},
 		},
-	},
-	{
+	}, {
 		input: `{on!~"bar"}`,
 		expected: []item{
 			{itemLeftBrace, 0, `{`},
@@ -320,72 +263,46 @@ var tests = []struct {
 			{itemString, 5, `"bar"`},
 			{itemRightBrace, 10, `}`},
 		},
-	},
-	{
-		input: `{alert!#"bar"}`,
-		fail:  true,
-	},
-	{
-		input: `{foo:a="bar"}`,
-		fail:  true,
+	}, {
+		input: `{alert!#"bar"}`, fail: true,
+	}, {
+		input: `{foo:a="bar"}`, fail: true,
 	},
 	// Test common errors.
 	{
-		input: `=~`,
-		fail:  true,
-	},
-	{
-		input: `!~`,
-		fail:  true,
-	},
-	{
-		input: `!(`,
-		fail:  true,
-	},
-	{
-		input: "1a",
-		fail:  true,
+		input: `=~`, fail: true,
+	}, {
+		input: `!~`, fail: true,
+	}, {
+		input: `!(`, fail: true,
+	}, {
+		input: "1a", fail: true,
 	},
 	// Test mismatched parens.
 	{
-		input: `(`,
-		fail:  true,
-	},
-	{
-		input: `())`,
-		fail:  true,
-	},
-	{
-		input: `(()`,
-		fail:  true,
-	},
-	{
-		input: `{`,
-		fail:  true,
-	},
-	{
-		input: `}`,
-		fail:  true,
-	},
-	{
-		input: "{{",
-		fail:  true,
-	},
-	{
-		input: `[`,
-		fail:  true,
-	},
-	{
-		input: `[[`,
-		fail:  true,
-	},
-	{
-		input: `[]]`,
-		fail:  true,
-	},
-	{
-		input: `]`,
-		fail:  true,
+		input: `(`, fail: true,
+	}, {
+		input: `())`, fail: true,
+	}, {
+		input: `(()`, fail: true,
+	}, {
+		input: `{`, fail: true,
+	}, {
+		input: `}`, fail: true,
+	}, {
+		input: "{{", fail: true,
+	}, {
+		input: "{{}}", fail: true,
+	}, {
+		input: `[`, fail: true,
+	}, {
+		input: `[[`, fail: true,
+	}, {
+		input: `[]]`, fail: true,
+	}, {
+		input: `[[]]`, fail: true,
+	}, {
+		input: `]`, fail: true,
 	},
 }
 

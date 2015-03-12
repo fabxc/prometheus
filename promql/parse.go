@@ -400,7 +400,11 @@ func (p *parser) matrixSelector(vs *VectorSelector) *MatrixSelector {
 func (p *parser) primaryExpr() Expr {
 	switch t := p.next(); {
 	case t.typ == itemNumber:
-		f, err := strconv.ParseFloat(t.val, 64)
+		n, err := strconv.ParseInt(t.val, 0, 64)
+		f := float64(n)
+		if err != nil {
+			f, err = strconv.ParseFloat(t.val, 64)
+		}
 		// TODO: Assuming infinity once we go over 1 << 64 seems intense.
 		if err != nil && err.(*strconv.NumError).Err != strconv.ErrRange {
 			p.errorf("error parsing number: %s", err)
@@ -473,30 +477,35 @@ func (p *parser) aggrExpr() *AggregateExpr {
 	var grouping clientmodel.LabelNames
 	var keepExtra bool
 
+	firstSyntax := false
+
 	if p.peek().typ == itemBy {
 		p.next()
 		grouping = p.labels()
+		firstSyntax = true
 	}
 	if p.peek().typ == itemKeepingExtra {
 		p.next()
 		keepExtra = true
+		firstSyntax = true
 	}
 
 	p.expect(itemLeftParen, ctx)
 	e := p.expr()
 	p.expect(itemRightParen, ctx)
 
-	if p.peek().typ == itemBy {
-		if len(grouping) > 0 {
-			p.errorf("aggregation must only contain one grouping clause")
+	if !firstSyntax {
+		if p.peek().typ == itemBy {
+			if len(grouping) > 0 {
+				p.errorf("aggregation must only contain one grouping clause")
+			}
+			p.next()
+			grouping = p.labels()
 		}
-		p.next()
-		grouping = p.labels()
-	}
-	// TODO(fabxc): do not allow mix of both syntaxs
-	if p.peek().typ == itemKeepingExtra {
-		p.next()
-		keepExtra = true
+		if p.peek().typ == itemKeepingExtra {
+			p.next()
+			keepExtra = true
+		}
 	}
 
 	return &AggregateExpr{
@@ -591,8 +600,10 @@ func (p *parser) labelMatchers(operators ...itemType) metric.LabelMatchers {
 			p.errorf("operator must be one of %q, is %q", operators, op)
 		}
 
-		val := p.expect(itemString, ctx).val
-		val = val[1 : len(val)-1] // strip quotes
+		val, err := strconv.Unquote(p.expect(itemString, ctx).val)
+		if err != nil {
+			p.error(err)
+		}
 
 		// Map the item to the respective match type.
 		var matchType metric.MatchType
@@ -715,7 +726,7 @@ func (p *parser) checkType(node Node) ExprType {
 		rt := p.checkType(n.RHS)
 
 		if !n.Op.isOperator() {
-			p.errorf("only logical and arithmetic operators allowed in binary expression")
+			p.errorf("only logical and arithmetic operators allowed in binary expression, got %q", n.Op)
 		}
 		if (lt != ExprScalar && lt != ExprVector) || (rt != ExprScalar && rt != ExprVector) {
 			p.errorf("binary expression must contain only scalar and vector types")
@@ -727,6 +738,7 @@ func (p *parser) checkType(node Node) ExprType {
 			}
 			n.VectorMatching = nil
 		} else {
+			// Both operands are vectors.
 			if n.Op == itemLAND || n.Op == itemLOR {
 				if n.VectorMatching.Card == CardOneToMany || n.VectorMatching.Card == CardManyToOne {
 					p.errorf("no grouping allowed for logical operators")
@@ -735,10 +747,11 @@ func (p *parser) checkType(node Node) ExprType {
 			}
 		}
 
+		if (lt == ExprScalar || rt == ExprScalar) && (n.Op == itemLAND || n.Op == itemLOR) {
+			p.errorf("AND and OR not allowed in binary scalar expression")
+		}
+
 		if lt == ExprScalar && rt == ExprScalar {
-			if n.Op == itemLAND || n.Op == itemLOR {
-				p.errorf("AND and OR not allowed in binary scalar expression")
-			}
 			return ExprScalar
 		}
 		return ExprVector
@@ -781,7 +794,9 @@ func (p *parser) checkType(node Node) ExprType {
 
 	case *NumberLiteral:
 		return ExprScalar
+
+	default:
+		p.errorf("unknown node type: %q", node)
 	}
-	p.errorf("unknown node type: %q", node)
 	return NoExpr
 }

@@ -25,7 +25,6 @@ import (
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
-	// "github.com/prometheus/prometheus/stats"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/metric"
 	"github.com/prometheus/prometheus/utility/test"

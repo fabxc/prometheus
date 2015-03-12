@@ -37,6 +37,7 @@ type Sample struct {
 	Timestamp clientmodel.Timestamp   `json:"timestamp"`
 }
 
+// Scalar is a scalar value evaluated at the set timestamp.
 type Scalar struct {
 	Value     clientmodel.SampleValue
 	Timestamp clientmodel.Timestamp
@@ -46,10 +47,14 @@ func (s *Scalar) String() string {
 	return fmt.Sprintf("scalar: %v @[%v]", s.Value, s.Timestamp)
 }
 
-type String string
+// String is a string value evaluated at the set timestamp.
+type String struct {
+	S         string
+	Timestamp clientmodel.Timestamp
+}
 
-func (s String) String() string {
-	return string(s)
+func (s *String) String() string {
+	return s.S
 }
 
 // Vector is basically only an alias for clientmodel.Samples, but the
@@ -84,7 +89,7 @@ type Value interface {
 func (Matrix) Type() ExprType  { return ExprMatrix }
 func (Vector) Type() ExprType  { return ExprVector }
 func (*Scalar) Type() ExprType { return ExprScalar }
-func (String) Type() ExprType  { return ExprString }
+func (*String) Type() ExprType { return ExprString }
 
 // Result holds the resulting value of an execution or an error
 // if any occurred.
@@ -93,7 +98,8 @@ type Result struct {
 	Value Value
 }
 
-// Vector returns a vector if the result value is one.
+// Vector returns a vector if the result value is one. An error is returned if
+// the result was an error of the result value is not a vector.
 func (r Result) Vector() (Vector, error) {
 	if r.Err != nil {
 		return nil, r.Err
@@ -105,7 +111,8 @@ func (r Result) Vector() (Vector, error) {
 	return v, nil
 }
 
-// Matrix returns a matrix is the result value is one.
+// Matrix returns a matrix. An error is returned if
+// the result was an error of the result value is not a matrix.
 func (r Result) Matrix() (Matrix, error) {
 	if r.Err != nil {
 		return nil, r.Err
@@ -117,13 +124,31 @@ func (r Result) Matrix() (Matrix, error) {
 	return v, nil
 }
 
-func (res *Result) String() string {
+// Scalar returns a scalar value. An error is returned if
+// the result was an error of the result value is not a scalar.
+func (r Result) Scalar() (*Scalar, error) {
+	if r.Err != nil {
+		return nil, r.Err
+	}
+	v, ok := r.Value.(*Scalar)
+	if !ok {
+		return nil, fmt.Errorf("query result is not a matrix")
+	}
+	return v, nil
+}
+
+func (res Result) String() string {
+	if res.Err != nil {
+		return res.Err.Error()
+	}
 	if res.Value == nil {
 		return ""
 	}
 	return res.Value.String()
 }
 
+// A Query is derived from an a raw query string and can be run against an engine
+// it is associated with.
 type Query interface {
 	// Exec starts evaluating the query and returns immediately.
 	// The returned channel blocks until the evaluation is done and receives
@@ -136,28 +161,40 @@ type Query interface {
 	Statements() Statements
 	// Stats returns statistics about the lifetime of the query.
 	Stats() *stats.TimerGroup
+	// Cancel signals that a running query execution should be aborted.
+	Cancel()
 }
 
+// query implements the Query interface.
 type query struct {
 	q      string     // The original query string.
 	stmts  Statements // Statements of the parsed query.
 	result Result     // Result of the evaluated query.
 	done   chan bool
 	stats  *stats.TimerGroup
+	cancel func()
 
 	ng *Engine // The engine against which the query is executed.
 }
 
+// Statements implements the Query interface.
 func (q *query) Statements() Statements {
 	return q.stmts
 }
 
+// Stats implements the Query interface.
 func (q *query) Stats() *stats.TimerGroup {
 	return q.stats
 }
 
-// Exec starts the execution of the query and returns. On finishing the execution
-// true is sent to the returned channel.
+// Cancel implements the Query interface.
+func (q *query) Cancel() {
+	if q.cancel != nil {
+		q.cancel()
+	}
+}
+
+// Exec implements the Query interface.
 func (q *query) Exec() <-chan bool {
 	go func() {
 		q.result = q.ng.exec(q)
@@ -181,10 +218,10 @@ func (q *query) Result() Result {
 type (
 	// AlertHandlers can be registered with an engine and are called on
 	// each executed alert statement.
-	AlertHandler func(*AlertStmt) error
+	AlertHandler func(context.Context, *AlertStmt) error
 	// RecordHandlers can be registered with an engine and are called on
 	// each executed record statement.
-	RecordHandler func(*RecordStmt) error
+	RecordHandler func(context.Context, *RecordStmt) error
 )
 
 // Engine handles the liftetime of queries from beginning to end. It is connected
@@ -299,6 +336,7 @@ func (ng *Engine) exec(q *query) (res Result) {
 
 	ctx, cancel := context.WithTimeout(ng.baseCtx, *defaultQueryTimeout)
 	defer cancel() // Cancel in case an error is raised.
+	q.cancel = cancel
 
 	q.stats.GetTimer(stats.TotalEvalTime).Start()
 	defer q.stats.GetTimer(stats.TotalEvalTime).Stop()
@@ -311,7 +349,7 @@ func (ng *Engine) exec(q *query) (res Result) {
 				case <-ctx.Done():
 					return Result{Err: ctx.Err()}
 				default:
-					err := h(s)
+					err := h(ctx, s)
 					if err != nil {
 						return Result{Err: err}
 					}
@@ -323,7 +361,7 @@ func (ng *Engine) exec(q *query) (res Result) {
 				case <-ctx.Done():
 					return Result{Err: ctx.Err()}
 				default:
-					err := h(s)
+					err := h(ctx, s)
 					if err != nil {
 						return Result{Err: err}
 					}
@@ -508,6 +546,15 @@ func (ev *evaluator) evalOneOf(e Expr, t1, t2 ExprType) Value {
 
 // eval evaluates the given expression as the given AST expression node requires.
 func (ev *evaluator) eval(expr Expr) Value {
+	// This is the top-level evaluation method.
+	// Thus, we check for timeout/cancellation here.
+	select {
+	case <-ev.ctx.Done():
+		ev.ng.errorf(ev.ctx.Err())
+	default:
+		// Go on with evaluation.
+	}
+
 	switch e := expr.(type) {
 	case *UnaryExpr:
 		smpl := ev.evalScalar(e.Expr)
@@ -554,7 +601,7 @@ func (ev *evaluator) eval(expr Expr) Value {
 		return e.Func.Call(ev, e.Args)
 
 	case *StringLiteral:
-		return String(e.S)
+		return &String{e.S, ev.Timestamp}
 
 	case *NumberLiteral:
 		return &Scalar{e.N, ev.Timestamp}
@@ -792,7 +839,7 @@ func (ev *evaluator) scalarBinop(op itemType, lhs, rhs clientmodel.SampleValue) 
 	case itemLTE:
 		btos(lhs <= rhs)
 	default:
-		ev.ng.errorf("illegal binary operation %s", op)
+		ev.ng.errorf("operator %q not allowed for scalar operations", op)
 	}
 	panic("unreachable")
 }
@@ -829,7 +876,7 @@ func (ev *evaluator) vectorElemBinop(op itemType, lhs, rhs clientmodel.SampleVal
 	case itemLTE:
 		return lhs, lhs <= rhs
 	default:
-		ev.ng.errorf("operator of type %q not allowed for vector elements", op)
+		ev.ng.errorf("operator %q not allowed for vector elements", op)
 	}
 	panic("unreachable")
 }

@@ -1,6 +1,7 @@
 package promql
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -15,6 +16,7 @@ var testExpr = []struct {
 	expected Node
 	fail     bool
 }{
+	// Scalars and scalar-to-scalar operations.
 	{
 		input:    "1",
 		expected: &NumberLiteral{1},
@@ -25,8 +27,59 @@ var testExpr = []struct {
 		input:    "-Inf",
 		expected: &NumberLiteral{clientmodel.SampleValue(math.Inf(-1))},
 	}, {
+		input:    ".5",
+		expected: &NumberLiteral{0.5},
+	}, {
+		input:    "5.",
+		expected: &NumberLiteral{5},
+	}, {
+		input:    "123.4567",
+		expected: &NumberLiteral{123.4567},
+	}, {
+		input:    "5e-3",
+		expected: &NumberLiteral{0.005},
+	}, {
+		input:    "5e3",
+		expected: &NumberLiteral{5000},
+	}, {
+		input:    "0xc",
+		expected: &NumberLiteral{12},
+	}, {
+		input:    "0755",
+		expected: &NumberLiteral{493},
+	}, {
 		input:    "1 + 1",
 		expected: &BinaryExpr{itemADD, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 - 1",
+		expected: &BinaryExpr{itemSUB, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 * 1",
+		expected: &BinaryExpr{itemMUL, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 % 1",
+		expected: &BinaryExpr{itemREM, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 / 1",
+		expected: &BinaryExpr{itemQUO, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 == 1",
+		expected: &BinaryExpr{itemEQL, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 != 1",
+		expected: &BinaryExpr{itemNEQ, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 > 1",
+		expected: &BinaryExpr{itemGTR, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 >= 1",
+		expected: &BinaryExpr{itemGTE, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 < 1",
+		expected: &BinaryExpr{itemLSS, &NumberLiteral{1}, &NumberLiteral{1}, nil},
+	}, {
+		input:    "1 <= 1",
+		expected: &BinaryExpr{itemLTE, &NumberLiteral{1}, &NumberLiteral{1}, nil},
 	}, {
 		input: "+1 + -2 * 1",
 		expected: &BinaryExpr{
@@ -50,6 +103,34 @@ var testExpr = []struct {
 			},
 		},
 	}, {
+		input: "1+", fail: true,
+	}, {
+		input: "2.5.", fail: true,
+	}, {
+		input: "100..4", fail: true,
+	}, {
+		input: "0deadbeef", fail: true,
+	}, {
+		input: "1 /", fail: true,
+	}, {
+		input: "*1", fail: true,
+	}, {
+		input: "(1))", fail: true,
+	}, {
+		input: "((1)", fail: true,
+	}, {
+		input: "(", fail: true,
+	}, {
+		input: "1 and 1", fail: true,
+	}, {
+		input: "1 or 1", fail: true,
+	}, {
+		input: "1 !~ 1", fail: true,
+	}, {
+		input: "1 =~ 1", fail: true,
+	},
+	// Vector binary operations.
+	{
 		input: "foo * bar",
 		expected: &BinaryExpr{
 			Op: itemMUL,
@@ -66,6 +147,66 @@ var testExpr = []struct {
 				},
 			},
 			VectorMatching: &VectorMatching{Card: CardOneToOne},
+		},
+	}, {
+		input: "foo == 1",
+		expected: &BinaryExpr{
+			Op: itemEQL,
+			LHS: &VectorSelector{
+				Name: "foo",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "foo"},
+				},
+			},
+			RHS: &NumberLiteral{1},
+		},
+	}, {
+		input: "2.5 / bar",
+		expected: &BinaryExpr{
+			Op:  itemQUO,
+			LHS: &NumberLiteral{2.5},
+			RHS: &VectorSelector{
+				Name: "bar",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+				},
+			},
+		},
+	}, {
+		input: "foo and bar",
+		expected: &BinaryExpr{
+			Op: itemLAND,
+			LHS: &VectorSelector{
+				Name: "foo",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "foo"},
+				},
+			},
+			RHS: &VectorSelector{
+				Name: "bar",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+				},
+			},
+			VectorMatching: &VectorMatching{Card: CardManyToMany},
+		},
+	}, {
+		input: "foo or bar",
+		expected: &BinaryExpr{
+			Op: itemLOR,
+			LHS: &VectorSelector{
+				Name: "foo",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "foo"},
+				},
+			},
+			RHS: &VectorSelector{
+				Name: "bar",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+				},
+			},
+			VectorMatching: &VectorMatching{Card: CardManyToMany},
 		},
 	}, {
 		input: "foo * on(test,blub) bar",
@@ -89,9 +230,30 @@ var testExpr = []struct {
 			},
 		},
 	}, {
-		input: "foo * on(test,blub) group_left(bar) bar",
+		input: "foo and on(test,blub) bar",
 		expected: &BinaryExpr{
-			Op: itemMUL,
+			Op: itemLAND,
+			LHS: &VectorSelector{
+				Name: "foo",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "foo"},
+				},
+			},
+			RHS: &VectorSelector{
+				Name: "bar",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+				},
+			},
+			VectorMatching: &VectorMatching{
+				Card: CardManyToMany,
+				On:   clientmodel.LabelNames{"test", "blub"},
+			},
+		},
+	}, {
+		input: "foo / on(test,blub) group_left(bar) bar",
+		expected: &BinaryExpr{
+			Op: itemQUO,
 			LHS: &VectorSelector{
 				Name: "foo",
 				LabelMatchers: metric.LabelMatchers{
@@ -111,9 +273,9 @@ var testExpr = []struct {
 			},
 		},
 	}, {
-		input: "foo * on(test,blub) group_right(bar,foo) bar",
+		input: "foo - on(test,blub) group_right(bar,foo) bar",
 		expected: &BinaryExpr{
-			Op: itemMUL,
+			Op: itemSUB,
 			LHS: &VectorSelector{
 				Name: "foo",
 				LabelMatchers: metric.LabelMatchers{
@@ -133,17 +295,25 @@ var testExpr = []struct {
 			},
 		},
 	}, {
-		input: "1+", fail: true,
+		input: "foo and 1", fail: true,
 	}, {
-		input: "1 /", fail: true,
+		input: "1 and foo", fail: true,
 	}, {
-		input: "*1", fail: true,
+		input: "foo or 1", fail: true,
 	}, {
-		input: "(1))", fail: true,
+		input: "1 or foo", fail: true,
 	}, {
-		input: "((1)", fail: true,
+		input: "1 or on(bar) foo", fail: true,
 	}, {
-		input: "(", fail: true,
+		input: "foo == on(bar) 10", fail: true,
+	}, {
+		input: "foo and on(bar) group_left(baz) bar", fail: true,
+	}, {
+		input: "foo and on(bar) group_right(baz) bar", fail: true,
+	}, {
+		input: "foo or on(bar) group_left(baz) bar", fail: true,
+	}, {
+		input: "foo or on(bar) group_right(baz) bar", fail: true,
 	},
 	// Test vector selector.
 	{
@@ -224,7 +394,7 @@ var testExpr = []struct {
 	}, {
 		input: `:foo`, fail: true,
 	},
-	// Test matric selector.
+	// Test matrix selector.
 	{
 		input: "test[5m]",
 		expected: &MatrixSelector{
@@ -322,7 +492,7 @@ var testExpr = []struct {
 			Grouping: clientmodel.LabelNames{"foo"},
 		},
 	}, {
-		input: "COUNT by (foo)(some_metric)",
+		input: "COUNT by (foo) keeping_extra (some_metric)",
 		expected: &AggregateExpr{
 			Op: itemCount,
 			Expr: &VectorSelector{
@@ -331,10 +501,11 @@ var testExpr = []struct {
 					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
 				},
 			},
-			Grouping: clientmodel.LabelNames{"foo"},
+			Grouping:        clientmodel.LabelNames{"foo"},
+			KeepExtraLabels: true,
 		},
 	}, {
-		input: "MIN (some_metric) by (foo)",
+		input: "MIN (some_metric) by (foo) keeping_extra",
 		expected: &AggregateExpr{
 			Op: itemMin,
 			Expr: &VectorSelector{
@@ -343,7 +514,8 @@ var testExpr = []struct {
 					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
 				},
 			},
-			Grouping: clientmodel.LabelNames{"foo"},
+			Grouping:        clientmodel.LabelNames{"foo"},
+			KeepExtraLabels: true,
 		},
 	}, {
 		input: "max by (foo)(some_metric)",
@@ -369,44 +541,42 @@ var testExpr = []struct {
 		input: `some_metric[5m] OFFSET`, fail: true,
 	}, {
 		input: `sum () by (test)`, fail: true,
+	}, {
+		input: "MIN keeping_extra (some_metric) by (foo)", fail: true,
+	}, {
+		input: "MIN by(test) (some_metric) keeping_extra", fail: true,
+	},
+	// Test function calls.
+	{
+		input: "time()",
+		expected: &Call{
+			Func: mustGetFunction("time"),
+		},
+	}, {
+		input: "floor(some_metric)",
+		expected: &Call{
+			Func: mustGetFunction("floor"),
+			Args: []Expr{
+				&VectorSelector{
+					Name: "some_metric",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
+					},
+				},
+			},
+		},
+	}, {
+		input: "floor()", fail: true,
+	}, {
+		input: "floor(some_metric, other_metric)", fail: true,
+	}, {
+		input: "floor(1)", fail: true,
+	}, {
+		input: "non_existant_function_far_bar()", fail: true,
 	},
 }
 
-// var (
-// 	ceil = reflect.ValueOf(funcCeil)
-// )
-
-var testSuccessCall = map[string]Node{
-// "ceil(metric_name)": &EvalStmt{&Call{
-// 	"ceil", ceil, []Expr{
-// 		&MetricSelector{Name: "metric_name"},
-// 	},
-// }},
-// "ceil()": &EvalStmt{&Call{"ceil", ceil, nil}},
-// "ceil(1)": &EvalStmt{
-// 	&Call{"ceil", ceil, []Expr{
-// 		&NumberLiteral{1},
-// 	}},
-// },
-// "ceil(1, 3*4)": &EvalStmt{
-// 	&Call{"ceil", ceil, []Expr{
-// 		&NumberLiteral{1},
-// 		&BinaryExpr{itemMUL, &NumberLiteral{3}, &NumberLiteral{4}},
-// 	}},
-// },
-// "ceil(ceil())": &EvalStmt{
-// 	&Call{"ceil", ceil, []Expr{&Call{"ceil", ceil, nil}}},
-// },
-// "ceil(ceil()[1m])": &EvalStmt{
-// 	&Call{"ceil", ceil, []Expr{&MatrixSelector{
-// 		E:        &Call{"ceil", ceil, nil},
-// 		Duration: 1 * time.Minute,
-// 	}},
-// 	},
-// },
-}
-
-func TestSuccess(t *testing.T) {
+func TestParseExpressions(t *testing.T) {
 	for _, test := range testExpr {
 		input := "EVAL " + test.input
 
@@ -450,4 +620,12 @@ func mustLabelMatcher(mt metric.MatchType, name clientmodel.LabelName, val clien
 		panic(err)
 	}
 	return m
+}
+
+func mustGetFunction(name string) *Function {
+	f, ok := GetFunction(name)
+	if !ok {
+		panic(fmt.Errorf("function %q does not exist", name))
+	}
+	return f
 }
