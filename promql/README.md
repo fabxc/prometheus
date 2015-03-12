@@ -127,7 +127,6 @@ An evaluation statements could look like this:
 	[<start>:<positive duration>:<step>] <expression>
 	[<negative duration>:<timestamp>:<step>] <expression>
 	[<negative duration>:<positive duration>:<step>] <expression>
-	[<negative duration>:<negative duration>:<step>] <expression>
 
 That's not say there cannot be functions like `engine.QueryRange(expr_str, start, end, step)`,
 that imply a specific statement.
