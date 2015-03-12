@@ -33,6 +33,7 @@ type Statement interface {
 	stmt()
 }
 
+// Statements is a list of statement nodes.
 type Statements []Statement
 
 // AlertStmt represents an added alert rule.
@@ -101,6 +102,9 @@ type Expr interface {
 	expr()
 }
 
+// Expressions is a list of expression nodes.
+type Expressions []Expr
+
 // ParenExpr wraps an expression so it cannot be disassembled as a consequence
 // of operator precendence.
 type ParenExpr struct {
@@ -147,8 +151,8 @@ type AggregateExpr struct {
 
 // Call represents a function call.
 type Call struct {
-	Func *Function // The function that was called.
-	Args []Expr    // Arguments used in the call.
+	Func *Function   // The function that was called.
+	Args Expressions // Arguments used in the call.
 }
 
 // StringLiteral represents a string.
@@ -240,6 +244,14 @@ func Walk(v Visitor, node Node) {
 		return
 	}
 	switch n := node.(type) {
+	case Statements:
+		for _, s := range n {
+			Walk(v, s)
+		}
+	case Expressions:
+		for _, e := range n {
+			Walk(v, e)
+		}
 	case *AlertStmt:
 		Walk(v, n.Expr)
 
@@ -263,9 +275,7 @@ func Walk(v Visitor, node Node) {
 		Walk(v, n.Expr)
 
 	case *Call:
-		for _, arg := range n.Args {
-			Walk(v, arg)
-		}
+		Walk(v, n.Args)
 
 	case *StringLiteral, *NumberLiteral, *VectorSelector, *MatrixSelector:
 		// nothing to do

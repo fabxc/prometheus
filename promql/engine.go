@@ -342,6 +342,11 @@ func (ng *Engine) errorf(format string, args ...interface{}) {
 	panic(fmt.Errorf(format, args...))
 }
 
+// error raises an error and terminates the execution stack of the engine.
+func (ng *Engine) error(err error) {
+	panic(err)
+}
+
 // exec executes all statements in the query. For evaluation statements only
 // one statement per query is allowed, after which the execution returns.
 func (ng *Engine) exec(q *query) (res Result) {
@@ -563,7 +568,7 @@ func (ev *evaluator) eval(expr Expr) Value {
 	// Thus, we check for timeout/cancellation here.
 	select {
 	case <-ev.ctx.Done():
-		ev.ng.errorf(ev.ctx.Err())
+		ev.ng.error(ev.ctx.Err())
 	default:
 		// Go on with evaluation.
 	}

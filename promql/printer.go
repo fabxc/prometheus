@@ -14,6 +14,7 @@
 package promql
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"sort"
@@ -65,6 +66,89 @@ func (matrix Matrix) String() string {
 	return strings.Join(metricStrings, "\n")
 }
 
+// Tree returns a string of the tree structure of the given node.
+func Tree(node Node) string {
+	return tree(node, "")
+}
+
+func tree(node Node, level string) string {
+	nl := level + " · · ·"
+	typs := strings.Split(fmt.Sprintf("%T", node), ".")[1]
+
+	var t string
+	// Only print the number of statements for readability.
+	if stmts, ok := node.(Statements); ok {
+		t = fmt.Sprintf("%s |---- %s :: %d\n", level, typs, len(stmts))
+	} else {
+		t = fmt.Sprintf("%s |---- %s :: %s\n", level, typs, node)
+	}
+
+	switch n := node.(type) {
+	case Statements:
+		for _, s := range n {
+			t += tree(s, nl)
+		}
+	case Expressions:
+		for _, e := range n {
+			t += tree(e, nl)
+		}
+	case *AlertStmt:
+		t += tree(n.Expr, nl)
+
+	case *RecordStmt:
+		t += tree(n.Expr, nl)
+
+	case *EvalStmt:
+		t += tree(n.Expr, nl)
+
+	case *ParenExpr:
+		t += tree(n.Expr, nl)
+
+	case *UnaryExpr:
+		t += tree(n.Expr, nl)
+
+	case *BinaryExpr:
+		t += tree(n.LHS, nl)
+		t += tree(n.RHS, nl)
+
+	case *AggregateExpr:
+		t += tree(n.Expr, nl)
+
+	case *Call:
+		t += tree(n.Args, nl)
+
+	case *StringLiteral, *NumberLiteral, *VectorSelector, *MatrixSelector:
+		// nothing to do
+	default:
+		panic("promql.Tree: not all node types covered")
+	}
+	return t
+}
+
+func (ss Statements) String() string {
+	if len(ss) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	for _, s := range ss {
+		buf.WriteString(s.String())
+		buf.WriteString("\n\n")
+	}
+	return buf.String()[:buf.Len()-2]
+}
+
+func (es Expressions) String() string {
+	if len(es) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	for _, e := range es {
+		buf.WriteString(e.String())
+		buf.WriteString(", ")
+	}
+	return buf.String()[:buf.Len()-2]
+}
+
 func (node *EvalStmt) String() string {
 	return "EVAL " + node.Expr.String()
 }
@@ -78,8 +162,8 @@ func (node *AlertStmt) String() string {
 	if len(node.Labels) > 0 {
 		s += fmt.Sprintf("\n\tWITH %s", node.Labels)
 	}
-	s += fmt.Sprintf("\n\tSUMMARY %s", node.Summary)
-	s += fmt.Sprintf("\n\tDESCRIPTION %s", node.Description)
+	s += fmt.Sprintf("\n\tSUMMARY %q", node.Summary)
+	s += fmt.Sprintf("\n\tDESCRIPTION %q", node.Description)
 	return s
 }
 
@@ -101,7 +185,18 @@ func (node *ParenExpr) String() string {
 }
 
 func (node *BinaryExpr) String() string {
-	return fmt.Sprintf("%s %s %s", node.LHS, node.Op, node.RHS)
+	matching := ""
+	vm := node.VectorMatching
+	if vm != nil && len(vm.On) > 0 {
+		matching = fmt.Sprintf(" ON(%s)", vm.On)
+		if vm.Card == CardManyToOne {
+			matching += fmt.Sprintf(" GROUP_LEFT(%s)", vm.Include)
+		}
+		if vm.Card == CardOneToMany {
+			matching += fmt.Sprintf(" GROUP_RIGHT(%s)", vm.Include)
+		}
+	}
+	return fmt.Sprintf("%s %s%s %s", node.LHS, node.Op, matching, node.RHS)
 }
 
 func (node *VectorSelector) String() string {
@@ -142,6 +237,9 @@ func (node *MatrixSelector) String() string {
 func (node *StringLiteral) String() string {
 	return fmt.Sprintf("%q", node.S)
 }
+
+func (es Expressions) DotGraph() string { return "not implemented" }
+func (ss Statements) DotGraph() string  { return "not implemented" }
 
 // DotGraph returns a DOT representation of the number literal.
 func (node *NumberLiteral) DotGraph() string {

@@ -213,23 +213,28 @@ func (p *parser) alertStmt() *AlertStmt {
 		}
 	}
 
-	// TODO(fabxc): is the WITH clause optional?
 	p.expect(itemWith, ctx)
 	lset := p.labelSet()
 
 	p.expect(itemSummary, ctx)
-	sum := p.expect(itemString, ctx)
+	sum, err := strconv.Unquote(p.expect(itemString, ctx).val)
+	if err != nil {
+		p.error(err)
+	}
 
 	p.expect(itemDescription, ctx)
-	desc := p.expect(itemString, ctx)
+	desc, err := strconv.Unquote(p.expect(itemString, ctx).val)
+	if err != nil {
+		p.error(err)
+	}
 
 	return &AlertStmt{
 		Name:        name.val,
 		Expr:        expr,
 		Duration:    duration,
 		Labels:      lset,
-		Summary:     sum.val,
-		Description: desc.val,
+		Summary:     sum,
+		Description: desc,
 	}
 }
 
@@ -243,14 +248,19 @@ func (p *parser) recordStmt() *RecordStmt {
 		p.next()
 	}
 	name := p.expectOneOf(itemIdentifier, itemMetricIdentifier, ctx).val
-	lset := p.labelSet()
 
-	// assignment operator is represented by equal item
-	p.expect(itemEQL, ctx)
+	var lset clientmodel.LabelSet
+	if p.peek().typ == itemLeftBrace {
+		lset = p.labelSet()
+	}
+
+	p.expect(itemAssign, ctx)
+	expr := p.expr()
+
 	return &RecordStmt{
 		Name:      name,
 		Labels:    lset,
-		Expr:      p.expr(),
+		Expr:      expr,
 		Permanent: permanent,
 	}
 }
@@ -721,6 +731,18 @@ func (p *parser) expectType(node Node, want ExprType, context string) {
 // if they do not form a valid node.
 func (p *parser) checkType(node Node) ExprType {
 	switch n := node.(type) {
+	case Statements:
+		for _, s := range n {
+			p.checkType(s)
+		}
+		return NoExpr
+
+	case Expressions:
+		for _, e := range n {
+			p.checkType(e)
+		}
+		return NoExpr
+
 	case *AlertStmt:
 		p.expectType(n.Expr, ExprVector, "alert statement")
 		return NoExpr

@@ -104,6 +104,7 @@ const (
 	itemLeftBracket
 	itemRightBracket
 	itemComma
+	itemAssign
 	itemSemicolon
 	itemString
 	itemNumber
@@ -400,10 +401,13 @@ func lexStatements(l *lexer) stateFn {
 			l.emit(itemSUB)
 		}
 	case r == '=':
-		if t := l.next(); t == '=' {
+		if t := l.peek(); t == '=' {
+			l.next()
 			l.emit(itemEQL)
-		} else {
+		} else if t == '~' {
 			return l.errorf("unrecognized character after '=': %#U", t)
+		} else {
+			l.emit(itemAssign)
 		}
 	case r == '!':
 		if t := l.next(); t == '=' {

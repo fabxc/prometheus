@@ -26,7 +26,7 @@ import (
 
 var testExpr = []struct {
 	input    string
-	expected Node
+	expected Expr
 	fail     bool
 }{
 	// Scalars and scalar-to-scalar operations.
@@ -566,16 +566,58 @@ var testExpr = []struct {
 			Func: mustGetFunction("time"),
 		},
 	}, {
-		input: "floor(some_metric)",
+		input: `floor(some_metric{foo!="bar"})`,
 		expected: &Call{
 			Func: mustGetFunction("floor"),
-			Args: []Expr{
+			Args: Expressions{
+				&VectorSelector{
+					Name: "some_metric",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.NotEqual, Name: "foo", Value: "bar"},
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
+					},
+				},
+			},
+		},
+	}, {
+		input: "rate(some_metric[5m])",
+		expected: &Call{
+			Func: mustGetFunction("rate"),
+			Args: Expressions{
+				&MatrixSelector{
+					Name: "some_metric",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
+					},
+					Interval: 5 * time.Minute,
+				},
+			},
+		},
+	}, {
+		input: "round(some_metric)",
+		expected: &Call{
+			Func: mustGetFunction("round"),
+			Args: Expressions{
 				&VectorSelector{
 					Name: "some_metric",
 					LabelMatchers: metric.LabelMatchers{
 						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
 					},
 				},
+			},
+		},
+	}, {
+		input: "round(some_metric, 5)",
+		expected: &Call{
+			Func: mustGetFunction("round"),
+			Args: Expressions{
+				&VectorSelector{
+					Name: "some_metric",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "some_metric"},
+					},
+				},
+				&NumberLiteral{5},
 			},
 		},
 	}, {
@@ -586,6 +628,8 @@ var testExpr = []struct {
 		input: "floor(1)", fail: true,
 	}, {
 		input: "non_existant_function_far_bar()", fail: true,
+	}, {
+		input: "rate(some_metric)", fail: true,
 	},
 }
 
@@ -597,7 +641,7 @@ func TestParseExpressions(t *testing.T) {
 
 		err := parser.parse()
 		if !test.fail && err != nil {
-			t.Errorf("error in input %q", input)
+			t.Errorf("error in input '%s'", input)
 			t.Fatalf("could not parse: %s", err)
 		}
 		if test.fail && err != nil {
@@ -606,7 +650,7 @@ func TestParseExpressions(t *testing.T) {
 
 		err = parser.typecheck()
 		if !test.fail && err != nil {
-			t.Errorf("error on input %q", input)
+			t.Errorf("error on input '%s'", input)
 			t.Fatalf("typecheck failed: %s", err)
 		}
 
@@ -614,15 +658,144 @@ func TestParseExpressions(t *testing.T) {
 			if err != nil {
 				continue
 			}
-			t.Errorf("error on input %q", input)
+			t.Errorf("error on input '%s'", input)
 			t.Fatalf("failure expected, but passed")
 		}
 
 		expected := &EvalStmt{test.expected.(Expr), 0, 0, 0}
 
 		if !reflect.DeepEqual(parser.stmts[0], expected) {
-			t.Errorf("error on input %q", input)
-			t.Fatalf("no match: expected %q, got %q", expected, parser.stmts[0])
+			t.Errorf("error on input '%s'", input)
+			t.Fatalf("no match\n\nexpected:\n%s\ngot: \n%s\n", Tree(expected), Tree(parser.stmts[0]))
+		}
+	}
+}
+
+var testStatement = []struct {
+	input    string
+	expected Statements
+	fail     bool
+}{
+	{
+		input: `
+			// A simple test recording rule.
+			dc:http_request:rate5m = sum(rate(http_request_count[5m])) by (dc)
+	
+			// A simple test alerting rule.
+			ALERT GlobalRequestRateLow IF(dc:http_request:rate5m < 10000) FOR 5m WITH {
+			    service = "testservice"
+			    /* ... more fields here ... */
+			  }
+			  SUMMARY "Global request rate low"
+			  DESCRIPTION "The global request rate is low"
+
+			foo = bar{label1="value1"}
+
+			ALERT BazAlert IF(foo > 10) WITH {}
+			  SUMMARY "Baz"
+			  DESCRIPTION "BazAlert"
+		`,
+		expected: Statements{
+			&RecordStmt{
+				Name: "dc:http_request:rate5m",
+				Expr: &AggregateExpr{
+					Op:       itemSum,
+					Grouping: clientmodel.LabelNames{"dc"},
+					Expr: &Call{
+						Func: mustGetFunction("rate"),
+						Args: Expressions{
+							&MatrixSelector{
+								Name: "http_request_count",
+								LabelMatchers: metric.LabelMatchers{
+									{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "http_request_count"},
+								},
+								Interval: 5 * time.Minute,
+							},
+						},
+					},
+				},
+				Labels:    nil,
+				Permanent: false,
+			},
+			&AlertStmt{
+				Name: "GlobalRequestRateLow",
+				Expr: &ParenExpr{&BinaryExpr{
+					Op: itemLSS,
+					LHS: &VectorSelector{
+						Name: "dc:http_request:rate5m",
+						LabelMatchers: metric.LabelMatchers{
+							{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "dc:http_request:rate5m"},
+						},
+					},
+					RHS: &NumberLiteral{10000},
+				}},
+				Labels:      clientmodel.LabelSet{"service": "testservice"},
+				Duration:    5 * time.Minute,
+				Summary:     "Global request rate low",
+				Description: "The global request rate is low",
+			},
+			&RecordStmt{
+				Name: "foo",
+				Expr: &VectorSelector{
+					Name: "bar",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: "label1", Value: "value1"},
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+					},
+				},
+				Labels:    nil,
+				Permanent: false,
+			},
+			&AlertStmt{
+				Name: "BazAlert",
+				Expr: &ParenExpr{&BinaryExpr{
+					Op: itemGTR,
+					LHS: &VectorSelector{
+						Name: "foo",
+						LabelMatchers: metric.LabelMatchers{
+							{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "foo"},
+						},
+					},
+					RHS: &NumberLiteral{10},
+				}},
+				Labels:      clientmodel.LabelSet{},
+				Summary:     "Baz",
+				Description: "BazAlert",
+			},
+		},
+	},
+}
+
+func TestParseStatements(t *testing.T) {
+	for _, test := range testStatement {
+		parser := NewParser("test", test.input)
+
+		err := parser.parse()
+		if !test.fail && err != nil {
+			t.Errorf("error in input: \n\n%s\n", test.input)
+			t.Fatalf("could not parse: %s", err)
+		}
+		if test.fail && err != nil {
+			continue
+		}
+
+		err = parser.typecheck()
+		if !test.fail && err != nil {
+			t.Errorf("error in input: \n\n%s\n", test.input)
+			t.Fatalf("typecheck failed: %s", err)
+		}
+
+		if test.fail {
+			if err != nil {
+				continue
+			}
+			t.Errorf("error in input: \n\n%s\n", test.input)
+			t.Fatalf("failure expected, but passed")
+		}
+
+		if !reflect.DeepEqual(parser.stmts, test.expected) {
+			t.Errorf("error in input: \n\n%s\n", test.input)
+			t.Fatalf("no match\n\nexpected:\n%s\ngot: \n%s\n", Tree(test.expected), Tree(parser.stmts))
 		}
 	}
 }
