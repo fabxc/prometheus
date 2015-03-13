@@ -110,8 +110,6 @@ const (
 	itemNumber
 	itemDuration
 
-	// regex ops are used for label matcher
-
 	operators_start
 	// operators
 	itemSUB

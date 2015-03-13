@@ -201,7 +201,7 @@ func TestAlertingRule(t *testing.T) {
 			failed = true
 		}
 
-		for j, expectedSample := rangxe expectedLines {
+		for j, expectedSample := range expectedLines {
 			found := false
 			for _, actualSample := range actualLines {
 				if actualSample == expectedSample {

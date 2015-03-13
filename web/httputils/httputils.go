@@ -55,13 +55,17 @@ func ErrorJSON(w io.Writer, err error) error {
 // RespondJSON converts the given data value to JSON and writes it to w.
 func RespondJSON(w io.Writer, val promql.Value) error {
 	data := struct {
-		Type    string       `json:"type"`
-		Value   promql.Value `json:"value"`
-		Version int          `json:"version"`
+		Type    string      `json:"type"`
+		Value   interface{} `json:"value"`
+		Version int         `json:"version"`
 	}{
 		Type:    val.Type().String(),
 		Value:   val,
 		Version: jsonFormatVersion,
+	}
+	// TODO(fabxc): Adding MarshalJSON to promql.Values might be a good idea.
+	if sc, ok := val.(*promql.Scalar); ok {
+		data.Value = sc.Value
 	}
 	enc := json.NewEncoder(w)
 	return enc.Encode(data)

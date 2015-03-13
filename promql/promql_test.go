@@ -16,7 +16,6 @@ package promql
 import (
 	"fmt"
 	"math"
-	// "path"
 	"regexp"
 	"strconv"
 	"strings"

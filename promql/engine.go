@@ -316,30 +316,21 @@ func (ng *Engine) EvalInstant(es string, ts clientmodel.Timestamp) (Query, error
 
 // EvalRange returns an evaluation query for the given time range and with
 // the resolution set by the interval.
-func (ng *Engine) EvalRange(expr string, start, end clientmodel.Timestamp, interval time.Duration) (Query, error) {
-	// TODO(fabxc): The parser only parses statements, that is, something the engine can process.
-	// The EvalStmt contains necessary information to evaluate an expression. For now 'EVAL'
-	// indicates an evaluation statement which we populate with values further down.
-	//
-	// See the README for further informaiton and ideas.
-	qs := "EVAL " + expr
-
-	stmts, err := Parse("query", qs)
+func (ng *Engine) EvalRange(qs string, start, end clientmodel.Timestamp, interval time.Duration) (Query, error) {
+	expr, err := ParseExpr("query", qs)
 	if err != nil {
 		return nil, err
 	}
-	if len(stmts) != 1 {
-		return nil, errors.New("only one expression must be queried at once")
+	es := &EvalStmt{
+		Expr:     expr,
+		Start:    start,
+		End:      end,
+		Interval: interval,
 	}
-	es := stmts[0].(*EvalStmt)
-
-	es.Start = start
-	es.End = end
-	es.Interval = interval
 
 	query := &query{
 		q:     qs,
-		stmts: stmts,
+		stmts: Statements{es},
 		ng:    ng,
 		done:  make(chan bool, 2),
 		stats: stats.NewTimerGroup(),

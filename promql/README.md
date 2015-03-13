@@ -9,14 +9,18 @@ evaluation, etc.) in one place rather than spreading it across all the nodes' me
 taken by golang's parser, text/template, and InfluxDB.
 I find it has high advantages in terms of maintainability and flexibility.
 
+I also do have dark memories about promising to keep changes small - so consider this a
+concept. Should it be the right direction I'll do my best to split it into digestable
+chunks.
+
 ## Parser and AST
 
 Lexer and parser should both be well tested. As mentioned the parsing now allows keywords
 for label names, handles operator precedence correctly, and supports different number notations
 including hex and octal.
 Adding new functionality might require more LOC than in yacc but is very straightforward and
-explicit so that it is less prone to unexpected behavior. Being able to test the lexer/parser
-is also a huge advantage.
+explicit so that it is less prone to unexpected behavior. Being able to test the lexer/parser,
+as easy as it is now, is also a big advantage.
 
 The AST is slightly more relaxed regarding typing. In total, however, correct
 typing should now be easier to track. By nature parsing and evaluating queries
@@ -40,6 +44,19 @@ seem justified only for a (non-critical) bug to show a few microseconds earlier.
 
 Looking at the actual code should reveal that it is not as much of an issue as this
 whole explanation might let you think.
+
+### Functions
+
+Using reflection for functions (like text/template does) was considered. There are few times
+where reflection makes sense. This seemed to be one of it. Having the functions define what
+data they want through their argument types would have been nice.
+In general, though, there are edge cases in `delta` etc. that would make it overly complicated.
+Leaving it as it is seems to provide greater flexibility. However, with the evaluator object,
+evaluating the arguments became a bit cleaner.
+
+Type constraints are now a bit stronger for functions - summed up, giving up a bit here, gaining
+a bit there... it boils down to minor differences that are not all that important
+in practice.
 
 ## Engine
 
@@ -69,6 +86,8 @@ The generic query interface is:
 		// Cancel signals that a running query execution should be aborted.
 		Cancel()
 	}
+
+For per-query timeouts this would naturally be extended by `ExecWithTimeout`.
 
 The resulting control flow for any query could look like this (currently it is a bit more specific
 about the query strings' content, see below why):
@@ -102,20 +121,24 @@ used in camlistore (Brad Fitzpatrick) - so it cannot be completely off.
 
 ### Thoughts on the QL
 
+_All Sci-Fi from down here. Brian already mentioned it's out of scope. It has nothing to do with
+the actual refactoring - other than it would be easy to add such extensions._
+
 To me a query language is a set of statements which I can throw at an application
 (e.g. through a shell or file) and they are simply executed. MongoDB, InfluxDB etc. are obvious
 examples. There are statements getting data from the storage but also statements modifying
-or informing about the current state (e.g., "SHOW DATABASES", "ADD USER").
+or informing about the current state (e.g. `SHOW DATABASES`, `ADD USER`).
 
-PromQL currently does not entirely fulfill that. An alert statement in general is a command
-that instructs to set a new alert (its not an alert in itself). The current engine reflects
-that by informing the rule manager on receiving such a statement.
+An alert statement in general is a command that instructs to set a new alert (its not an alert
+in itself). The current engine reflects that by informing the rule manager on receiving such a statement.
 In contrast, an expression is not a statement. It needs more information to know what to do
 with it, namely an evaluation timestamp or range. However, this is not part of the QL as of
-now. I would strongly recommend having an actual evaluation statement (right now the engine uses
-a pseudo-statement).
+now. I would vote for having an actual evaluation statement. (Right now the engine uses
+a pseudo-statement. _And I would stick with having it as a statement internally regardless, as
+that's an executable unit._)
 
-An evaluation statements could look like this:
+An evaluation statement could look like this (naturally timestamps are bad news when typing a
+query manually - in that case duration offsets are probably what you'd want to use anyway):
 
 	// Instant evaluation. Timestamp can also be 'now'
 	[<timestamp>] <expression>
@@ -133,21 +156,7 @@ that are convenient to use from within Go code.
 The future may bring more relevant requirements to modify Prometheus's state at runtime or get
 information about it.
 Backing up to long-term storage (now), removing old data (now), or anything that fulfills
-"Do this, now!" and is thus not part of the more static configuration. The engine
-is then a central place to execute or relay those statements and handle the process.
+"Do this, now!" and is thus not part of the more static configuration.
 
-To me having a set of parsable statements that I can execute through a file, a shell, or over
-HTTP seems very appealing.
-
-### Functions
-
-Using reflection for functions (like text/template does) was considered. There are few times
-where reflection makes sense. This seemed to be one of it. Having the function's define what
-data they want through their argument types would have been nice.
-In general, though, there are edge cases in `delta` etc. that would make it overly complicated.
-Leaving it as it is seems to provide greater flexibility. However, with the evaluator object,
-evaluating the arguments became a bit cleaner.
-
-Type constraints are now a bit stronger for functions - summed up, giving up a bit here, gaining
-a bit there... in total it seems to be minor differences that are not all that important
-in practice.
+The respective endpoints in the engine could obviously easily be used to provide the same data
+over HTTP handlers and whatnot.
