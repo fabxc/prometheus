@@ -15,8 +15,6 @@ package rules
 
 import (
 	"fmt"
-	// "regexp"
-	// "strconv"
 	"strings"
 	"testing"
 	"time"
@@ -203,7 +201,7 @@ func TestAlertingRule(t *testing.T) {
 			failed = true
 		}
 
-		for j, expectedSample := range expectedLines {
+		for j, expectedSample := rangxe expectedLines {
 			found := false
 			for _, actualSample := range actualLines {
 				if actualSample == expectedSample {

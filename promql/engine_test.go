@@ -51,7 +51,7 @@ func TestQueryTimeout(t *testing.T) {
 	}
 }
 
-func TestQueryCancellation(t *testing.T) {
+func TestQueryCancel(t *testing.T) {
 	storage, closer := local.NewTestStorage(t, 1)
 	defer closer.Close()
 

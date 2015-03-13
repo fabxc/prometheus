@@ -5,36 +5,33 @@ It involves introducing a custom lexer/parser and centralizing query execution
 in a query engine.
 
 Sidenote: The approach of collecting behavior for all nodes (walks, typechecks,
-evaluation, etc.) in one place rather than spreading it across all the nodes' was
+evaluation, etc.) in one place rather than spreading it across all the nodes' methods was
 taken by golang's parser, text/template, and InfluxDB.
-I find it has high advantages in terms of maintainability and flexibility. Chances
-are if I'm looking up the type-checks for unary expressions I also want to see it for
-binary expressions a moment later. Looking 10 lines below rather than searching for
-the method makes it easier.
+I find it has high advantages in terms of maintainability and flexibility.
 
 ## Parser and AST
 
-Lexer and parser should both be well tested. As mentioned
-the parsing now allows keywords for labelnames, handles operator precedence correctly, supports
-different number notations including hex and octal.
+Lexer and parser should both be well tested. As mentioned the parsing now allows keywords
+for label names, handles operator precedence correctly, and supports different number notations
+including hex and octal.
 Adding new functionality might require more LOC than in yacc but is very straightforward and
-explicit so that it is less prone to unexpected behavior. Being able to test lexer/parser
+explicit so that it is less prone to unexpected behavior. Being able to test the lexer/parser
 is also a huge advantage.
 
 The AST is slightly more relaxed regarding typing. In total, however, correct
 typing should now be easier to track. By nature parsing and evaluating queries
-involves lots of type-checks at runtime. Thus, over all it seems more
-important that we can easily ensure where and how types are checked.
+involves lots of type-checks at runtime. Thus, over all it seems more important that
+we can easily track where and how types are checked.
+Golang and InfluxDB use the same approach. It also greatly simplifies things should there
+ever be new value types. In general, it also works more natural with the parser. 
 
-The old AST had stronger assumptions about a nodes' return types. The new parser
-re-assigns child nodes in binary operations based on operator precedence. During
-parsing the changes thus greatly simplified things.
 After parsing the whole input, the parser enters its type-checking stage. The fully
 constructed AST is traversed and proper typing is ensured.
-This has the advantage of having all type-checks in a single, maintainable place.
+This has the advantage of having all type-checks in a single, maintainable place to
+provide type errors at parsing time.
 
-Using the lexed token types directly in the AST was also chosen in text/template and
-avoids constant mapping between enumerations and having repetitive String methods
+Using the lexed token types directly in the AST was also chosen in Golang and text/template
+and avoids constant mapping between enumerations and having repetitive String methods
 for them all.
 In go, every enumeration needs a switch-case with a default error either way. After
 parsing an expression the default error can only happen if there is a bug in the first
@@ -52,7 +49,8 @@ involved in correctly executing the query (i.e., storage, rule manager, whatever
 the future brings...).
 Gathering of statistics, timeouts and cancellation are completely internal to the engine.
 The clearer separation should allow arbitrary changes for all stages without touching
-any code outside of promql.
+any code outside of promql. Contexts will make it easy to parallelize query execution (and
+cancel it from any goroutine on error) should it turn out useful.
 
 The generic query interface is:
 
@@ -73,7 +71,7 @@ The generic query interface is:
 	}
 
 The resulting control flow for any query could look like this (currently it is a bit more specific
-about the query strings content, see below why):
+about the query strings' content, see below why):
 
 	q, err := engine.Query("my awesome query")
 	if err != nil {
@@ -93,19 +91,19 @@ about the query strings content, see below why):
 
 As the above sidenote suggests expression evaluation is now gathered in a single
 evaluator object. The same approach was taken in text/template and by InfluxDB. It
-makes it easy to jump between evaluations without type definitions and unrelated methods
-interfering.
-It also provides great flexibility for future optimizations, however they may look like.
+makes it easy to jump between evaluation implementations without type definitions
+and unrelated methods interfering.
+It also provides good flexibility for future optimizations, however they may look like.
 
 The engine handles expression evaluation but the rules manager is still external. The rule 
 manager registers handlers with the engine that are called on receiving new rule statements.
-I consider it an easy and flexible way of breaking dependencies and it is heavily
+I consider it an easy and flexible way of breaking dependencies and the approach is heavily
 used in camlistore (Brad Fitzpatrick) - so it cannot be completely off.
 
 ### Thoughts on the QL
 
 To me a query language is a set of statements which I can throw at an application
-(e.g. through a cmd) and they are simply executed. MongoDB, InfluxDB etc. are convenient
+(e.g. through a shell or file) and they are simply executed. MongoDB, InfluxDB etc. are obvious
 examples. There are statements getting data from the storage but also statements modifying
 or informing about the current state (e.g., "SHOW DATABASES", "ADD USER").
 
@@ -114,7 +112,8 @@ that instructs to set a new alert (its not an alert in itself). The current engi
 that by informing the rule manager on receiving such a statement.
 In contrast, an expression is not a statement. It needs more information to know what to do
 with it, namely an evaluation timestamp or range. However, this is not part of the QL as of
-now.
+now. I would strongly recommend having an actual evaluation statement (right now the engine uses
+a pseudo-statement).
 
 An evaluation statements could look like this:
 
@@ -128,18 +127,17 @@ An evaluation statements could look like this:
 	[<negative duration>:<timestamp>:<step>] <expression>
 	[<negative duration>:<positive duration>:<step>] <expression>
 
-That's not say there cannot be functions like `engine.QueryRange(expr_str, start, end, step)`,
-that imply a specific statement.
+That's not say there cannot be functions like `engine.EvalRange(expr_str, start, end, step)`,
+that are convenient to use from within Go code.
 
 The future may bring more relevant requirements to modify Prometheus's state at runtime or get
 information about it.
-Backing up to long-term storage, removing old data, or anything that fulfills "Do this, now!"
-and is thus not part of the more static configuration. The engine
-is then a central place to control and relay those statements.
+Backing up to long-term storage (now), removing old data (now), or anything that fulfills
+"Do this, now!" and is thus not part of the more static configuration. The engine
+is then a central place to execute or relay those statements and handle the process.
 
 To me having a set of parsable statements that I can execute through a file, a shell, or over
-HTTP seems very appealing. I know what I get and if there's anything wrong with my input
-the engine will let me know.
+HTTP seems very appealing.
 
 ### Functions
 
