@@ -61,6 +61,12 @@ var testExpr = []struct {
 		input:    "0755",
 		expected: &NumberLiteral{493},
 	}, {
+		input:    "+5.5e-3",
+		expected: &UnaryExpr{Op: itemADD, Expr: &NumberLiteral{0.0055}},
+	}, {
+		input:    "-0755",
+		expected: &UnaryExpr{Op: itemSUB, Expr: &NumberLiteral{493}},
+	}, {
 		input:    "1 + 1",
 		expected: &BinaryExpr{itemADD, &NumberLiteral{1}, &NumberLiteral{1}, nil},
 	}, {
@@ -141,6 +147,10 @@ var testExpr = []struct {
 		input: "1 !~ 1", fail: true,
 	}, {
 		input: "1 =~ 1", fail: true,
+	}, {
+		input: "-some_metric", fail: true,
+	}, {
+		input: `-"string"`, fail: true,
 	},
 	// Vector binary operations.
 	{
@@ -220,6 +230,81 @@ var testExpr = []struct {
 				},
 			},
 			VectorMatching: &VectorMatching{Card: CardManyToMany},
+		},
+	}, {
+		// Test and/or precedence and reassigning of operands.
+		input: "foo + bar or bla and blub",
+		expected: &BinaryExpr{
+			Op: itemLOR,
+			LHS: &BinaryExpr{
+				Op: itemADD,
+				LHS: &VectorSelector{
+					Name: "foo",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "foo"},
+					},
+				},
+				RHS: &VectorSelector{
+					Name: "bar",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+					},
+				},
+				VectorMatching: &VectorMatching{Card: CardOneToOne},
+			},
+			RHS: &BinaryExpr{
+				Op: itemLAND,
+				LHS: &VectorSelector{
+					Name: "bla",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bla"},
+					},
+				},
+				RHS: &VectorSelector{
+					Name: "blub",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "blub"},
+					},
+				},
+				VectorMatching: &VectorMatching{Card: CardManyToMany},
+			},
+			VectorMatching: &VectorMatching{Card: CardManyToMany},
+		},
+	}, {
+		// Test precedence and reassigning of operands.
+		input: "bar + on(foo) bla / on(baz, buz) group_right(test) blub",
+		expected: &BinaryExpr{
+			Op: itemADD,
+			LHS: &VectorSelector{
+				Name: "bar",
+				LabelMatchers: metric.LabelMatchers{
+					{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+				},
+			},
+			RHS: &BinaryExpr{
+				Op: itemQUO,
+				LHS: &VectorSelector{
+					Name: "bla",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bla"},
+					},
+				},
+				RHS: &VectorSelector{
+					Name: "blub",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "blub"},
+					},
+				},
+				VectorMatching: &VectorMatching{
+					Card:    CardOneToMany,
+					On:      clientmodel.LabelNames{"baz", "buz"},
+					Include: clientmodel.LabelNames{"test"},
+				},
+			},
+			VectorMatching: &VectorMatching{
+				Card: CardOneToOne,
+				On:   clientmodel.LabelNames{"foo"},
+			},
 		},
 	}, {
 		input: "foo * on(test,blub) bar",
@@ -671,6 +756,29 @@ func TestParseExpressions(t *testing.T) {
 	}
 }
 
+// NaN has no equality. Thus, we need a separate test for it.
+func TestNaNExpression(t *testing.T) {
+	parser := NewParser("test", "EVAL NaN")
+
+	err := parser.parse()
+	if err != nil {
+		t.Errorf("error on input 'NaN'")
+		t.Fatalf("coud not parse: %s", err)
+	}
+
+	stmt := parser.stmts[0].(*EvalStmt)
+	nl, ok := stmt.Expr.(*NumberLiteral)
+	if !ok {
+		t.Errorf("error on input 'NaN'")
+		t.Fatalf("expected number literal but got %T", stmt.Expr)
+	}
+
+	if !math.IsNaN(float64(nl.N)) {
+		t.Errorf("error on input 'NaN'")
+		t.Fatalf("expected 'NaN' in number literal but got %d", nl.N)
+	}
+}
+
 var testStatement = []struct {
 	input    string
 	expected Statements
@@ -800,6 +908,24 @@ var testStatement = []struct {
 		fail:  true,
 	}, {
 		input: "foo = 1",
+		fail:  true,
+	}, {
+		input: "foo = bar[5m]",
+		fail:  true,
+	}, {
+		input: `foo = "test"`,
+		fail:  true,
+	}, {
+		input: `foo = `,
+		fail:  true,
+	}, {
+		input: `foo{a!="b"} = bar`,
+		fail:  true,
+	}, {
+		input: `foo{a=~"b"} = bar`,
+		fail:  true,
+	}, {
+		input: `foo{a!~"b"} = bar`,
 		fail:  true,
 	}, {
 		input: `ALERT SomeName IF time() WITH {} 

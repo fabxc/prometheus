@@ -22,18 +22,33 @@ import (
 )
 
 // Node is a generic interface for all nodes in an AST.
+//
+// Whenever numerous nodes are listed such as in a switch-case statement
+// or a chain of function definitions (e.g. String(), expr(), etc.) convention is
+// to list them as follows:
+//
+// 	- Statements
+// 	- statement types (alphabetical)...
+// 	- Expressions
+// 	- expression types (alphabetical)...
+//
 type Node interface {
+	// String representation of the node that returns the given node when parsed
+	// as part of a valid query.
 	String() string
+	// DotGraph returns a dot graph representation of the node.
 	DotGraph() string
 }
 
 // Statement is a generic interface for all statements.
 type Statement interface {
 	Node
+
+	// stmt ensures that no other type accidentally implements the interface
 	stmt()
 }
 
-// Statements is a list of statement nodes.
+// Statements is a list of statement nodes that implements Node.
 type Statements []Statement
 
 // AlertStmt represents an added alert rule.
@@ -70,10 +85,11 @@ func (*EvalStmt) stmt()   {}
 func (*AlertStmt) stmt()  {}
 func (*RecordStmt) stmt() {}
 
+// ExprType is the type an evaluated expression returns.
 type ExprType int
 
 const (
-	NoExpr ExprType = iota
+	ExprNone ExprType = iota
 	ExprScalar
 	ExprVector
 	ExprMatrix
@@ -82,8 +98,8 @@ const (
 
 func (e ExprType) String() string {
 	switch e {
-	case NoExpr:
-		return "<NoExpr>"
+	case ExprNone:
+		return "<ExprNone>"
 	case ExprScalar:
 		return "scalar"
 	case ExprVector:
@@ -93,29 +109,29 @@ func (e ExprType) String() string {
 	case ExprString:
 		return "string"
 	}
-	panic("unreachable")
+	panic("promql.ExprType.String: unhandled expression type")
 }
 
 // Expr is a generic interface for all expression types.
 type Expr interface {
 	Node
+
+	// Type returns the type the expression evaluates to. It does not perform
+	// in-depth checks as this is done at parsing-time.
+	Type() ExprType
+	// expr ensures that no other types accidentally implement the interface.
 	expr()
 }
 
-// Expressions is a list of expression nodes.
+// Expressions is a list of expression nodes that implements Node.
 type Expressions []Expr
 
-// ParenExpr wraps an expression so it cannot be disassembled as a consequence
-// of operator precendence.
-type ParenExpr struct {
-	Expr Expr
-}
-
-// UnaryExpr represents a unary operation on another expression.
-// Currently unary operations are only supported for scalars.
-type UnaryExpr struct {
-	Op   itemType
-	Expr Expr
+// AggregateExpr represents an aggregation operation on a vector.
+type AggregateExpr struct {
+	Op              itemType               // The used aggregation operation.
+	Expr            Expr                   // The vector expression over which is aggregated.
+	Grouping        clientmodel.LabelNames // The labels by which to group the vector.
+	KeepExtraLabels bool                   // Whether to keep extra labels common among result elements.
 }
 
 // BinaryExpr represents a binary expression between two child expressions.
@@ -128,41 +144,10 @@ type BinaryExpr struct {
 	VectorMatching *VectorMatching
 }
 
-// VectorMatching describes how elements from two vectors in a binary
-// operation are supposed to be matched.
-type VectorMatching struct {
-	// The cardinality of the two vectors.
-	Card VectorMatchCardinality
-	// On contains the labels which define equality of a pair
-	// of elements from the vectors.
-	On clientmodel.LabelNames
-	// Include contains additional labels that should be included in
-	// the result from the side with the higher cardinality.
-	Include clientmodel.LabelNames
-}
-
-// AggregateExpr represents an aggregation operation on a vector.
-type AggregateExpr struct {
-	Op              itemType               // The used aggregation operation.
-	Expr            Expr                   // The vector expression over which is aggregated.
-	Grouping        clientmodel.LabelNames // The labels by which to group the vector.
-	KeepExtraLabels bool                   // Whether to keep extra labels common among result elements.
-}
-
 // Call represents a function call.
 type Call struct {
 	Func *Function   // The function that was called.
 	Args Expressions // Arguments used in the call.
-}
-
-// StringLiteral represents a string.
-type StringLiteral struct {
-	S string
-}
-
-// NumberLiteral represents a number.
-type NumberLiteral struct {
-	N clientmodel.SampleValue
 }
 
 // MatrixSelector represents a matrix selection.
@@ -179,6 +164,29 @@ type MatrixSelector struct {
 	fingerprints clientmodel.Fingerprints
 }
 
+// NumberLiteral represents a number.
+type NumberLiteral struct {
+	N clientmodel.SampleValue
+}
+
+// ParenExpr wraps an expression so it cannot be disassembled as a consequence
+// of operator precendence.
+type ParenExpr struct {
+	Expr Expr
+}
+
+// StringLiteral represents a string.
+type StringLiteral struct {
+	S string
+}
+
+// UnaryExpr represents a unary operation on another expression.
+// Currently unary operations are only supported for scalars.
+type UnaryExpr struct {
+	Op   itemType
+	Expr Expr
+}
+
 // VectorSelector represents a vector selection.
 type VectorSelector struct {
 	Name          string
@@ -192,15 +200,31 @@ type VectorSelector struct {
 	fingerprints clientmodel.Fingerprints
 }
 
-func (*UnaryExpr) expr()      {}
-func (*ParenExpr) expr()      {}
-func (*BinaryExpr) expr()     {}
+func (e *AggregateExpr) Type() ExprType  { return ExprVector }
+func (e *Call) Type() ExprType           { return e.Func.ReturnType }
+func (e *MatrixSelector) Type() ExprType { return ExprMatrix }
+func (e *NumberLiteral) Type() ExprType  { return ExprScalar }
+func (e *ParenExpr) Type() ExprType      { return e.Expr.Type() }
+func (e *StringLiteral) Type() ExprType  { return ExprString }
+func (e *UnaryExpr) Type() ExprType      { return e.Expr.Type() }
+func (e *VectorSelector) Type() ExprType { return ExprVector }
+
+func (e *BinaryExpr) Type() ExprType {
+	if e.LHS.Type() == ExprScalar && e.RHS.Type() == ExprScalar {
+		return ExprScalar
+	}
+	return ExprVector
+}
+
 func (*AggregateExpr) expr()  {}
+func (*BinaryExpr) expr()     {}
 func (*Call) expr()           {}
-func (*StringLiteral) expr()  {}
-func (*NumberLiteral) expr()  {}
-func (*VectorSelector) expr() {}
 func (*MatrixSelector) expr() {}
+func (*NumberLiteral) expr()  {}
+func (*ParenExpr) expr()      {}
+func (*StringLiteral) expr()  {}
+func (*UnaryExpr) expr()      {}
+func (*VectorSelector) expr() {}
 
 // VectorMatchCardinaly describes the cardinality relationship
 // of two vectors in a binary operation.
@@ -224,7 +248,20 @@ func (vmc VectorMatchCardinality) String() string {
 	case CardManyToMany:
 		return "N-to-N"
 	}
-	panic("unknown match cardinality")
+	panic("promql.VectorMatchCardinality.String: unknown match cardinality")
+}
+
+// VectorMatching describes how elements from two vectors in a binary
+// operation are supposed to be matched.
+type VectorMatching struct {
+	// The cardinality of the two vectors.
+	Card VectorMatchCardinality
+	// On contains the labels which define equality of a pair
+	// of elements from the vectors.
+	On clientmodel.LabelNames
+	// Include contains additional labels that should be included in
+	// the result from the side with the higher cardinality.
+	Include clientmodel.LabelNames
 }
 
 // A Visitor's Visit method is invoked for each node encountered by Walk.
@@ -248,18 +285,28 @@ func Walk(v Visitor, node Node) {
 		for _, s := range n {
 			Walk(v, s)
 		}
-	case Expressions:
-		for _, e := range n {
-			Walk(v, e)
-		}
 	case *AlertStmt:
+		Walk(v, n.Expr)
+
+	case *EvalStmt:
 		Walk(v, n.Expr)
 
 	case *RecordStmt:
 		Walk(v, n.Expr)
 
-	case *EvalStmt:
+	case Expressions:
+		for _, e := range n {
+			Walk(v, e)
+		}
+	case *AggregateExpr:
 		Walk(v, n.Expr)
+
+	case *BinaryExpr:
+		Walk(v, n.LHS)
+		Walk(v, n.RHS)
+
+	case *Call:
+		Walk(v, n.Args)
 
 	case *ParenExpr:
 		Walk(v, n.Expr)
@@ -267,21 +314,11 @@ func Walk(v Visitor, node Node) {
 	case *UnaryExpr:
 		Walk(v, n.Expr)
 
-	case *BinaryExpr:
-		Walk(v, n.LHS)
-		Walk(v, n.RHS)
-
-	case *AggregateExpr:
-		Walk(v, n.Expr)
-
-	case *Call:
-		Walk(v, n.Args)
-
-	case *StringLiteral, *NumberLiteral, *VectorSelector, *MatrixSelector:
+	case *MatrixSelector, *NumberLiteral, *StringLiteral, *VectorSelector:
 		// nothing to do
 
 	default:
-		panic("promql.Walk: unexpected node type")
+		panic("promql.Walk: unhandled node type")
 	}
 
 	v.Visit(nil)

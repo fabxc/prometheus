@@ -314,7 +314,13 @@ func (ng *Engine) EvalInstant(es string, ts clientmodel.Timestamp) (Query, error
 // EvalRange returns an evaluation query for the given time range and with
 // the resolution set by the interval.
 func (ng *Engine) EvalRange(expr string, start, end clientmodel.Timestamp, interval time.Duration) (Query, error) {
+	// TODO(fabxc): The parser only parses statements, that is, something the engine can process.
+	// The EvalStmt contains necessary information to evaluate an expression. For now 'EVAL'
+	// indicates an evaluation statement which we populate with values further down.
+	//
+	// See the README for further informaiton and ideas.
 	qs := "EVAL " + expr
+
 	stmts, err := Parse("query", qs)
 	if err != nil {
 		return nil, err
@@ -577,15 +583,9 @@ func (ev *evaluator) eval(expr Expr) Value {
 	}
 
 	switch e := expr.(type) {
-	case *UnaryExpr:
-		smpl := ev.evalScalar(e.Expr)
-		if e.Op == itemSUB {
-			smpl.Value = -smpl.Value
-		}
-		return smpl
-
-	case *ParenExpr:
-		return ev.eval(e.Expr)
+	case *AggregateExpr:
+		vector := ev.evalVector(e.Expr)
+		return ev.aggregation(e.Op, e.Grouping, e.KeepExtraLabels, vector)
 
 	case *BinaryExpr:
 		lhs := ev.evalOneOf(e.LHS, ExprScalar, ExprVector)
@@ -608,26 +608,34 @@ func (ev *evaluator) eval(expr Expr) Value {
 			return ev.vectorScalarBinop(e.Op, rhs.(Vector), lhs.(*Scalar), true)
 		}
 
+	case *Call:
+		return e.Func.Call(ev, e.Args)
+
 	case *MatrixSelector:
 		return ev.matrixSelector(e)
 
-	case *VectorSelector:
-		return ev.vectorSelector(e)
+	case *NumberLiteral:
+		return &Scalar{e.N, ev.Timestamp}
 
-	case *AggregateExpr:
-		vector := ev.evalVector(e.Expr)
-		return ev.aggregation(e.Op, e.Grouping, e.KeepExtraLabels, vector)
-
-	case *Call:
-		return e.Func.Call(ev, e.Args)
+	case *ParenExpr:
+		return ev.eval(e.Expr)
 
 	case *StringLiteral:
 		return &String{e.S, ev.Timestamp}
 
-	case *NumberLiteral:
-		return &Scalar{e.N, ev.Timestamp}
+	case *UnaryExpr:
+		smpl := ev.evalScalar(e.Expr)
+		if e.Op == itemSUB {
+			smpl.Value = -smpl.Value
+		}
+		return smpl
+
+	case *VectorSelector:
+		return ev.vectorSelector(e)
+
+	default:
+		ev.ng.errorf("unhandled expression of type: %T", expr)
 	}
-	ev.ng.errorf("unhandled expression of type: %T", expr)
 	return nil
 }
 

@@ -189,6 +189,8 @@ var key = map[string]itemType{
 	"GROUP_RIGHT":   itemGroupRight,
 }
 
+// These are the default string representation for common items. It does not
+// imply that those are the only character sequences that can be lexed to such an item.
 var itemTypeStr = map[itemType]string{
 	itemSUB:      "-",
 	itemADD:      "+",

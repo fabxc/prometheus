@@ -300,68 +300,78 @@ func (p *parser) expr() Expr {
 // expressions based on the operator's precedence.
 func (p *parser) binaryExpr() Expr {
 	const ctx = "binary expression"
-	// Parse a non-binary expression type to start.
-	// This variable will always be the root of the expression tree.
+
+	// Parse the starting expression.
 	expr := p.unaryExpr()
 
-	// Loop over operations and unary exprs and build a tree based on precendence.
+	// Loop through the operations and construct a binary operation tree based
+	// on the operators' precedence.
 	for {
-		// If the next token is NOT an operator then return the expression.
+		// If the next token is not an operator the expression is done.
 		op := p.peek().typ
 		if !op.isOperator() {
 			return expr
 		}
 		p.next() // consume operator
 
-		vmc := CardOneToOne
-		var matchOn, include clientmodel.LabelNames
-		if p.peek().typ == itemOn {
-			p.next()
-			matchOn = p.labels()
+		// Parse optional operator matching options. Its validity
+		// is checked in the type-checking stage.
+		vecMatching := &VectorMatching{
+			Card: CardOneToOne,
 		}
-		if p.peek().typ == itemGroupLeft {
-			p.next()
-			vmc = CardManyToOne
-			include = p.labels()
-		} else if p.peek().typ == itemGroupRight {
-			p.next()
-			vmc = CardOneToMany
-			include = p.labels()
+		if op == itemLAND || op == itemLOR {
+			vecMatching.Card = CardManyToMany
 		}
 
-		for _, ln := range matchOn {
-			for _, ln2 := range include {
+		// Parse ON clause.
+		if p.peek().typ == itemOn {
+			p.next()
+			vecMatching.On = p.labels()
+
+			// Parse grouping.
+			if t := p.peek().typ; t == itemGroupLeft {
+				p.next()
+				vecMatching.Card = CardManyToOne
+				vecMatching.Include = p.labels()
+			} else if t == itemGroupRight {
+				p.next()
+				vecMatching.Card = CardOneToMany
+				vecMatching.Include = p.labels()
+			}
+		}
+
+		for _, ln := range vecMatching.On {
+			for _, ln2 := range vecMatching.Include {
 				if ln == ln2 {
-					p.errorf("label %q must not occur in ON and INCLUDE clause", ln)
+					p.errorf("label %q must not occur in ON and INCLUDE clause at once", ln)
 				}
 			}
 		}
 
-		// Otherwise parse the next unary expression.
+		// Parse the next operand.
 		rhs := p.unaryExpr()
 
-		var be *BinaryExpr
 		// Assign the new root based on the precendence of the LHS and RHS operators.
 		if lhs, ok := expr.(*BinaryExpr); ok && lhs.Op.precedence() < op.precedence() {
-			be = &BinaryExpr{
+			expr = &BinaryExpr{
 				Op:  lhs.Op,
 				LHS: lhs.LHS,
-				RHS: &BinaryExpr{Op: op, LHS: lhs.RHS, RHS: rhs},
+				RHS: &BinaryExpr{
+					Op:             op,
+					LHS:            lhs.RHS,
+					RHS:            rhs,
+					VectorMatching: vecMatching,
+				},
+				VectorMatching: lhs.VectorMatching,
 			}
 		} else {
-			be = &BinaryExpr{Op: op, LHS: expr, RHS: rhs}
-		}
-
-		if len(matchOn) > 0 {
-			be.VectorMatching = &VectorMatching{
-				Card:    vmc,
-				On:      matchOn,
-				Include: include,
+			expr = &BinaryExpr{
+				Op:             op,
+				LHS:            expr,
+				RHS:            rhs,
+				VectorMatching: vecMatching,
 			}
-		} else {
-			be.VectorMatching = &VectorMatching{Card: CardOneToOne}
 		}
-		expr = be
 	}
 	return nil
 }
@@ -388,7 +398,7 @@ func (p *parser) unaryExpr() Expr {
 	if p.peek().typ == itemLeftBracket {
 		vs, ok := e.(*VectorSelector)
 		if !ok {
-			p.errorf("matrix selected expression must be a metric selection but is %q", e)
+			p.errorf("matrix selected expression must be a metric selection but is %T", e)
 		}
 		e = p.matrixSelector(vs)
 	}
@@ -511,7 +521,7 @@ func (p *parser) aggrExpr() *AggregateExpr {
 
 	agop := p.next()
 	if !agop.typ.isAggregator() {
-		p.errorf("%s is not an aggregation operator")
+		p.errorf("%s is not an aggregation operator", agop)
 	}
 	var grouping clientmodel.LabelNames
 	var keepExtra bool
@@ -745,32 +755,51 @@ func (p *parser) expectType(node Node, want ExprType, context string) {
 
 // check the types of the children of each node and raise an error
 // if they do not form a valid node.
-func (p *parser) checkType(node Node) ExprType {
+// Some of these checks are redundant as the the parsing stage does not allow
+// them, but the cost is small and might reveal errors when making changes.
+func (p *parser) checkType(node Node) (typ ExprType) {
+	// For expressions the type is determined by their Type function.
+	// Statements and lists do not have a type but are not invalid either.
+	switch n := node.(type) {
+	case Statements, Expressions, Statement:
+		typ = ExprNone
+	case Expr:
+		typ = n.Type()
+	default:
+		p.errorf("unknown node type: %T", node)
+	}
+
+	// Recursively check correct typing for child nodes and raise
+	// errors in case of bad typing.
 	switch n := node.(type) {
 	case Statements:
 		for _, s := range n {
-			p.checkType(s)
+			p.expectType(s, ExprNone, "statement list")
 		}
-		return NoExpr
-
-	case Expressions:
-		for _, e := range n {
-			p.checkType(e)
-		}
-		return NoExpr
-
 	case *AlertStmt:
 		p.expectType(n.Expr, ExprVector, "alert statement")
-		return NoExpr
+
+	case *EvalStmt:
+		ty := p.checkType(n.Expr)
+		if ty == ExprNone {
+			p.errorf("evaluation statement must have a valid expression type but got %s", ty)
+		}
 
 	case *RecordStmt:
 		p.expectType(n.Expr, ExprVector, "record statement")
-		return NoExpr
 
-	case *EvalStmt:
-		// any type allowed
-		p.checkType(n.Expr)
-		return NoExpr
+	case Expressions:
+		for _, e := range n {
+			ty := p.checkType(e)
+			if ty == ExprNone {
+				p.errorf("expression must have a valid expression type but got %s", ty)
+			}
+		}
+	case *AggregateExpr:
+		if !n.Op.isAggregator() {
+			p.errorf("aggregation operator expected in aggregation expression but got %q", n.Op)
+		}
+		p.expectType(n.Expr, ExprVector, "aggregation expression")
 
 	case *BinaryExpr:
 		lt := p.checkType(n.LHS)
@@ -792,20 +821,17 @@ func (p *parser) checkType(node Node) ExprType {
 			// Both operands are vectors.
 			if n.Op == itemLAND || n.Op == itemLOR {
 				if n.VectorMatching.Card == CardOneToMany || n.VectorMatching.Card == CardManyToOne {
-					p.errorf("no grouping allowed for logical operators")
+					p.errorf("no grouping allowed for AND and OR operations")
 				}
-				n.VectorMatching.Card = CardManyToMany
+				if n.VectorMatching.Card != CardManyToMany {
+					p.errorf("AND and OR operations must always be many-to-many")
+				}
 			}
 		}
 
 		if (lt == ExprScalar || rt == ExprScalar) && (n.Op == itemLAND || n.Op == itemLOR) {
 			p.errorf("AND and OR not allowed in binary scalar expression")
 		}
-
-		if lt == ExprScalar && rt == ExprScalar {
-			return ExprScalar
-		}
-		return ExprVector
 
 	case *Call:
 		nargs := len(n.Func.ArgTypes)
@@ -819,35 +845,20 @@ func (p *parser) checkType(node Node) ExprType {
 			p.expectType(arg, n.Func.ArgTypes[i], fmt.Sprintf("call to function %q", n.Func.Name))
 		}
 
-		return n.Func.ReturnType
-
-	case *AggregateExpr:
-		p.expectType(n.Expr, ExprVector, "aggregation expression")
-		if !n.Op.isAggregator() {
-			p.errorf("aggregation operator expected in aggregation expression but got %q", n.Op)
-		}
-		return ExprVector
-
 	case *ParenExpr:
-		return p.checkType(n.Expr)
+		p.checkType(n.Expr)
 
 	case *UnaryExpr:
-		return p.checkType(n.Expr)
+		if n.Op != itemADD && n.Op != itemSUB {
+			p.errorf("only + and - operators allowed for unary expressions")
+		}
+		p.expectType(n.Expr, ExprScalar, "unary expression")
 
-	case *VectorSelector:
-		return ExprVector
-
-	case *MatrixSelector:
-		return ExprMatrix
-
-	case *StringLiteral:
-		return ExprString
-
-	case *NumberLiteral:
-		return ExprScalar
+	case *NumberLiteral, *MatrixSelector, *StringLiteral, *VectorSelector:
+		// Nothing to do for terminals.
 
 	default:
-		p.errorf("unknown node type: %q", node)
+		p.errorf("unknown node type: %T", node)
 	}
-	return NoExpr
+	return
 }
