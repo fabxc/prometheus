@@ -51,7 +51,7 @@ type RecordStmt struct {
 	Name      string
 	Expr      Expr
 	Labels    clientmodel.LabelSet
-	Permanent bool
+	Permanent bool // TODO(fabxc): Permanent recording rules are not yet implemented.
 }
 
 // EvalStmt holds an expression and information on the range it should

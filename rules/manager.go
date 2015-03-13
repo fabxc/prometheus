@@ -20,6 +20,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/net/context"
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
@@ -121,7 +122,7 @@ func NewRuleManager(o *RuleManagerOptions) RuleManager {
 		notificationHandler: o.NotificationHandler,
 		prometheusURL:       o.PrometheusURL,
 	}
-	manager.engine.RegisterAlertHandler("rule_manager", manager.AddAlertRule)
+	manager.engine.RegisterAlertHandler("rule_manager", manager.AddAlertingRule)
 	manager.engine.RegisterRecordHandler("rule_manager", manager.AddRecordingRule)
 
 	return manager
@@ -264,7 +265,7 @@ func (m *ruleManager) runIteration() {
 	wg.Wait()
 }
 
-func (m *ruleManager) AddAlertRule(ctx context.Context, r *promql.AlertStmt) error {
+func (m *ruleManager) AddAlertingRule(ctx context.Context, r *promql.AlertStmt) error {
 	rule := NewAlertingRule(r.Name, r.Expr, r.Duration, r.Labels, r.Summary, r.Description)
 
 	m.Lock()

@@ -37,7 +37,7 @@ func (rule RecordingRule) Name() string { return rule.name }
 
 // EvalRaw returns the raw value of the rule expression.
 func (rule RecordingRule) EvalRaw(timestamp clientmodel.Timestamp, engine *promql.Engine) (promql.Vector, error) {
-	query, err := engine.QueryInstant(rule.vector.String(), timestamp)
+	query, err := engine.EvalInstant(rule.vector.String(), timestamp)
 	if err != nil {
 		return nil, err
 	}

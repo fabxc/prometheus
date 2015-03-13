@@ -46,6 +46,22 @@ func Parse(name, input string) (Statements, error) {
 	return p.stmts, err
 }
 
+// ParseExpr parses the input expression.
+func ParseExpr(name, input string) (expr Expr, err error) {
+	p := &parser{
+		name:  name,
+		lex:   lex(name, input),
+		stmts: make(Statements, 0),
+	}
+
+	defer p.recover(&err)
+
+	expr = p.expr()
+	p.checkType(expr)
+
+	return
+}
+
 // NewParser returns a new parser.
 func NewParser(name, input string) *parser {
 	p := &parser{

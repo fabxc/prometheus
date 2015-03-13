@@ -25,7 +25,7 @@ import (
 var testSampleInterval = time.Duration(5) * time.Minute
 var testStartTime = clientmodel.Timestamp(0)
 
-func getTestValueStream(startVal clientmodel.SampleValue, endVal clientmodel.SampleValue, stepVal clientmodel.SampleValue, startTime clientmodel.Timestamp) (resultValues metric.Values) {
+func getTestValueStream(startVal, endVal, stepVal clientmodel.SampleValue, startTime clientmodel.Timestamp) (resultValues metric.Values) {
 	currentTime := startTime
 	for currentVal := startVal; currentVal <= endVal; currentVal += stepVal {
 		sample := metric.SamplePair{
@@ -65,6 +65,8 @@ func storeMatrix(storage local.Storage, matrix Matrix) {
 	storage.AppendSamples(pendingSamples)
 	storage.WaitForIndexing()
 }
+
+var testVector = getTestVectorFromTestMatrix(testMatrix)
 
 var testMatrix = Matrix{
 	{
@@ -480,5 +482,3 @@ var testMatrix = Matrix{
 		Values: getTestValueStream(0, 200, 20, testStartTime),
 	},
 }
-
-var testVector = getTestVectorFromTestMatrix(testMatrix)

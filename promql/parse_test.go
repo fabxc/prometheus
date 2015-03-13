@@ -677,6 +677,7 @@ var testStatement = []struct {
 	fail     bool
 }{
 	{
+		// Test a file-like input.
 		input: `
 			// A simple test recording rule.
 			dc:http_request:rate5m = sum(rate(http_request_count[5m])) by (dc)
@@ -691,7 +692,7 @@ var testStatement = []struct {
 
 			foo = bar{label1="value1"}
 
-			ALERT BazAlert IF(foo > 10) WITH {}
+			ALERT BazAlert IF foo > 10 WITH {}
 			  SUMMARY "Baz"
 			  DESCRIPTION "BazAlert"
 		`,
@@ -748,7 +749,7 @@ var testStatement = []struct {
 			},
 			&AlertStmt{
 				Name: "BazAlert",
-				Expr: &ParenExpr{&BinaryExpr{
+				Expr: &BinaryExpr{
 					Op: itemGTR,
 					LHS: &VectorSelector{
 						Name: "foo",
@@ -757,12 +758,71 @@ var testStatement = []struct {
 						},
 					},
 					RHS: &NumberLiteral{10},
-				}},
+				},
 				Labels:      clientmodel.LabelSet{},
 				Summary:     "Baz",
 				Description: "BazAlert",
 			},
 		},
+	}, {
+		input: `foo{x="", a="z"} = bar{a="b", x=~"y"}`,
+		expected: Statements{
+			&RecordStmt{
+				Name: "foo",
+				Expr: &VectorSelector{
+					Name: "bar",
+					LabelMatchers: metric.LabelMatchers{
+						{Type: metric.Equal, Name: "a", Value: "b"},
+						mustLabelMatcher(metric.RegexMatch, "x", "y"),
+						{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "bar"},
+					},
+				},
+				Labels:    clientmodel.LabelSet{"x": "", "a": "z"},
+				Permanent: false,
+			},
+		},
+	}, {
+		input: `
+			// A simple test alerting rule.
+			ALERT GlobalRequestRateLow IF(dc:http_request:rate5m < 10000) FOR 5 WITH {
+			    service = "testservice"
+			    /* ... more fields here ... */
+			  }
+			  SUMMARY "Global request rate low"
+			  DESCRIPTION "The global request rate is low"
+	  	`,
+		fail: true,
+	}, {
+		input:    "",
+		expected: Statements{},
+	}, {
+		input: "foo = time()",
+		fail:  true,
+	}, {
+		input: "foo = 1",
+		fail:  true,
+	}, {
+		input: `ALERT SomeName IF time() WITH {} 
+			SUMMARY "Global request rate low"
+			DESCRIPTION "The global request rate is low"
+		`,
+		fail: true,
+	}, {
+		input: `ALERT SomeName IF some_metric > 1 WITH {} 
+			SUMMARY "Global request rate low"
+		`,
+		fail: true,
+	}, {
+		input: `ALERT SomeName IF some_metric > 1 WITH {} 
+			DESCRIPTION "The global request rate is low"
+		`,
+		fail: true,
+	}, {
+		input: `ALERT SomeName IF some_metric > 1 
+			SUMMARY "Global request rate low"
+			DESCRIPTION "The global request rate is low"
+		`,
+		fail: true,
 	},
 }
 

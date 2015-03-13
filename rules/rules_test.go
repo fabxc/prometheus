@@ -13,245 +13,211 @@
 
 package rules
 
-// import (
-// 	"fmt"
-// 	"math"
-// 	"path"
-// 	"regexp"
-// 	"strconv"
-// 	"strings"
-// 	"testing"
-// 	"time"
+import (
+	"fmt"
+	// "regexp"
+	// "strconv"
+	"strings"
+	"testing"
+	"time"
 
-// 	clientmodel "github.com/prometheus/client_golang/model"
+	clientmodel "github.com/prometheus/client_golang/model"
 
-// 	"github.com/prometheus/prometheus/rules/ast"
-// 	"github.com/prometheus/prometheus/stats"
-// 	"github.com/prometheus/prometheus/storage/local"
-// 	"github.com/prometheus/prometheus/storage/metric"
-// 	"github.com/prometheus/prometheus/utility/test"
-// )
+	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/storage/local"
+	"github.com/prometheus/prometheus/storage/metric"
+)
 
-// var (
-// 	testEvalTime = testStartTime.Add(testSampleInterval * 10)
-// 	fixturesPath = "fixtures"
+var (
+	testSampleInterval = time.Duration(5) * time.Minute
+	testStartTime      = clientmodel.Timestamp(0)
+)
 
-// 	reSample  = regexp.MustCompile(`^(.*)(?: \=\>|:) (\-?\d+\.?\d*e?\d*|[+-]Inf|NaN) \@\[(\d+)\]$`)
-// 	minNormal = math.Float64frombits(0x0010000000000000) // The smallest positive normal value of type float64.
-// )
+func getTestValueStream(startVal clientmodel.SampleValue, endVal clientmodel.SampleValue, stepVal clientmodel.SampleValue, startTime clientmodel.Timestamp) (resultValues metric.Values) {
+	currentTime := startTime
+	for currentVal := startVal; currentVal <= endVal; currentVal += stepVal {
+		sample := metric.SamplePair{
+			Value:     currentVal,
+			Timestamp: currentTime,
+		}
+		resultValues = append(resultValues, sample)
+		currentTime = currentTime.Add(testSampleInterval)
+	}
+	return resultValues
+}
 
-// const (
-// 	epsilon = 0.000001 // Relative error allowed for sample values.
-// )
+func getTestVectorFromTestMatrix(matrix promql.Matrix) promql.Vector {
+	vector := promql.Vector{}
+	for _, sampleStream := range matrix {
+		lastSample := sampleStream.Values[len(sampleStream.Values)-1]
+		vector = append(vector, &promql.Sample{
+			Metric:    sampleStream.Metric,
+			Value:     lastSample.Value,
+			Timestamp: lastSample.Timestamp,
+		})
+	}
+	return vector
+}
 
-// func annotateWithTime(lines []string, timestamp clientmodel.Timestamp) []string {
-// 	annotatedLines := []string{}
-// 	for _, line := range lines {
-// 		annotatedLines = append(annotatedLines, fmt.Sprintf(line, timestamp))
-// 	}
-// 	return annotatedLines
-// }
+func storeMatrix(storage local.Storage, matrix promql.Matrix) {
+	pendingSamples := clientmodel.Samples{}
+	for _, sampleStream := range matrix {
+		for _, sample := range sampleStream.Values {
+			pendingSamples = append(pendingSamples, &clientmodel.Sample{
+				Metric:    sampleStream.Metric.Metric,
+				Value:     sample.Value,
+				Timestamp: sample.Timestamp,
+			})
+		}
+	}
+	storage.AppendSamples(pendingSamples)
+	storage.WaitForIndexing()
+}
 
-// func vectorComparisonString(expected []string, actual []string) string {
-// 	separator := "\n--------------\n"
-// 	return fmt.Sprintf("Expected:%v%v%v\nActual:%v%v%v ",
-// 		separator,
-// 		strings.Join(expected, "\n"),
-// 		separator,
-// 		separator,
-// 		strings.Join(actual, "\n"),
-// 		separator)
-// }
+func vectorComparisonString(expected []string, actual []string) string {
+	separator := "\n--------------\n"
+	return fmt.Sprintf("Expected:%v%v%v\nActual:%v%v%v ",
+		separator,
+		strings.Join(expected, "\n"),
+		separator,
+		separator,
+		strings.Join(actual, "\n"),
+		separator)
+}
 
-// // samplesAlmostEqual returns true if the two sample lines only differ by a
-// // small relative error in their sample value.
-// func samplesAlmostEqual(a, b string) bool {
-// 	if a == b {
-// 		// Fast path if strings are equal.
-// 		return true
-// 	}
-// 	aMatches := reSample.FindStringSubmatch(a)
-// 	if aMatches == nil {
-// 		panic(fmt.Errorf("sample %q did not match regular expression", a))
-// 	}
-// 	bMatches := reSample.FindStringSubmatch(b)
-// 	if bMatches == nil {
-// 		panic(fmt.Errorf("sample %q did not match regular expression", b))
-// 	}
-// 	if aMatches[1] != bMatches[1] {
-// 		return false // Labels don't match.
-// 	}
-// 	if aMatches[3] != bMatches[3] {
-// 		return false // Timestamps don't match.
-// 	}
-// 	// If we are here, we have the diff in the floats.
-// 	// We have to check if they are almost equal.
-// 	aVal, err := strconv.ParseFloat(aMatches[2], 64)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	bVal, err := strconv.ParseFloat(bMatches[2], 64)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+func annotateWithTime(lines []string, timestamp clientmodel.Timestamp) []string {
+	annotatedLines := []string{}
+	for _, line := range lines {
+		annotatedLines = append(annotatedLines, fmt.Sprintf(line, timestamp))
+	}
+	return annotatedLines
+}
 
-// 	// Cf. http://floating-point-gui.de/errors/comparison/
-// 	if aVal == bVal {
-// 		return true
-// 	}
+var testMatrix = promql.Matrix{
+	{
+		Metric: clientmodel.COWMetric{
+			Metric: clientmodel.Metric{
+				clientmodel.MetricNameLabel: "http_requests",
+				clientmodel.JobLabel:        "api-server",
+				"instance":                  "0",
+				"group":                     "canary",
+			},
+		},
+		Values: getTestValueStream(0, 300, 30, testStartTime),
+	},
+	{
+		Metric: clientmodel.COWMetric{
+			Metric: clientmodel.Metric{
+				clientmodel.MetricNameLabel: "http_requests",
+				clientmodel.JobLabel:        "api-server",
+				"instance":                  "1",
+				"group":                     "canary",
+			},
+		},
+		Values: getTestValueStream(0, 400, 40, testStartTime),
+	},
+	{
+		Metric: clientmodel.COWMetric{
+			Metric: clientmodel.Metric{
+				clientmodel.MetricNameLabel: "http_requests",
+				clientmodel.JobLabel:        "app-server",
+				"instance":                  "0",
+				"group":                     "canary",
+			},
+		},
+		Values: getTestValueStream(0, 700, 70, testStartTime),
+	},
+	{
+		Metric: clientmodel.COWMetric{
+			Metric: clientmodel.Metric{
+				clientmodel.MetricNameLabel: "http_requests",
+				clientmodel.JobLabel:        "app-server",
+				"instance":                  "1",
+				"group":                     "canary",
+			},
+		},
+		Values: getTestValueStream(0, 800, 80, testStartTime),
+	},
+}
 
-// 	diff := math.Abs(aVal - bVal)
+func TestAlertingRule(t *testing.T) {
+	// Labels in expected output need to be alphabetically sorted.
+	var evalOutputs = [][]string{
+		{
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="0", job="app-server", severity="critical"} => 1 @[%v]`,
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="1", job="app-server", severity="critical"} => 1 @[%v]`,
+		},
+		{
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="0", job="app-server", severity="critical"} => 0 @[%v]`,
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="0", job="app-server", severity="critical"} => 1 @[%v]`,
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="1", job="app-server", severity="critical"} => 0 @[%v]`,
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="1", job="app-server", severity="critical"} => 1 @[%v]`,
+		},
+		{
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="1", job="app-server", severity="critical"} => 0 @[%v]`,
+			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="0", job="app-server", severity="critical"} => 0 @[%v]`,
+		},
+		{
+		/* empty */
+		},
+		{
+		/* empty */
+		},
+	}
 
-// 	if aVal == 0 || bVal == 0 || diff < minNormal {
-// 		return diff < epsilon*minNormal
-// 	}
-// 	return diff/(math.Abs(aVal)+math.Abs(bVal)) < epsilon
-// }
+	storage, closer := local.NewTestStorage(t, 1)
+	defer closer.Close()
 
-// func newTestStorage(t testing.TB) (storage local.Storage, closer test.Closer) {
-// 	storage, closer = local.NewTestStorage(t, 1)
-// 	storeMatrix(storage, testMatrix)
-// 	return storage, closer
-// }
+	storeMatrix(storage, testMatrix)
 
-// var ruleTests = []struct {
-// 	inputFile         string
-// 	shouldFail        bool
-// 	errContains       string
-// 	numRecordingRules int
-// 	numAlertingRules  int
-// }{
-// 	{
-// 		inputFile:         "empty.rules",
-// 		numRecordingRules: 0,
-// 		numAlertingRules:  0,
-// 	}, {
-// 		inputFile:         "mixed.rules",
-// 		numRecordingRules: 2,
-// 		numAlertingRules:  2,
-// 	},
-// 	{
-// 		inputFile:   "syntax_error.rules",
-// 		shouldFail:  true,
-// 		errContains: "Error parsing rules at line 5",
-// 	},
-// 	{
-// 		inputFile:   "non_vector.rules",
-// 		shouldFail:  true,
-// 		errContains: "does not evaluate to vector type",
-// 	},
-// }
+	engine := promql.NewEngine(storage)
+	defer engine.Stop()
 
-// func TestRules(t *testing.T) {
-// 	for i, ruleTest := range ruleTests {
-// 		testRules, err := LoadRulesFromFile(path.Join(fixturesPath, ruleTest.inputFile))
+	expr, err := promql.ParseExpr("test", `http_requests{group="canary", job="app-server"} < 100`)
+	if err != nil {
+		t.Fatalf("Unable to parse alert expression: %s", err)
+	}
 
-// 		if err != nil {
-// 			if !ruleTest.shouldFail {
-// 				t.Fatalf("%d. Error parsing rules file %v: %v", i, ruleTest.inputFile, err)
-// 			} else {
-// 				if !strings.Contains(err.Error(), ruleTest.errContains) {
-// 					t.Fatalf("%d. Expected error containing '%v', got: %v", i, ruleTest.errContains, err)
-// 				}
-// 			}
-// 		} else {
-// 			numRecordingRules := 0
-// 			numAlertingRules := 0
+	alertLabels := clientmodel.LabelSet{
+		"severity": "critical",
+	}
+	rule := NewAlertingRule("HttpRequestRateLow", expr, time.Minute, alertLabels, "summary", "description")
 
-// 			for j, rule := range testRules {
-// 				switch rule.(type) {
-// 				case *RecordingRule:
-// 					numRecordingRules++
-// 				case *AlertingRule:
-// 					numAlertingRules++
-// 				default:
-// 					t.Fatalf("%d.%d. Unknown rule type!", i, j)
-// 				}
-// 			}
+	for i, expectedLines := range evalOutputs {
+		evalTime := testStartTime.Add(testSampleInterval * time.Duration(i))
 
-// 			if numRecordingRules != ruleTest.numRecordingRules {
-// 				t.Fatalf("%d. Expected %d recording rules, got %d", i, ruleTest.numRecordingRules, numRecordingRules)
-// 			}
-// 			if numAlertingRules != ruleTest.numAlertingRules {
-// 				t.Fatalf("%d. Expected %d alerting rules, got %d", i, ruleTest.numAlertingRules, numAlertingRules)
-// 			}
+		res, err := rule.Eval(evalTime, engine)
+		if err != nil {
+			t.Fatalf("Error during alerting rule evaluation: %s", err)
+		}
 
-// 			// TODO(julius): add more complex checks on the parsed rules here.
-// 		}
-// 	}
-// }
+		actualLines := strings.Split(res.String(), "\n")
+		expectedLines := annotateWithTime(expectedLines, evalTime)
+		if actualLines[0] == "" {
+			actualLines = []string{}
+		}
 
-// func TestAlertingRule(t *testing.T) {
-// 	// Labels in expected output need to be alphabetically sorted.
-// 	var evalOutputs = [][]string{
-// 		{
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="0", job="app-server", severity="critical"} => 1 @[%v]`,
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="1", job="app-server", severity="critical"} => 1 @[%v]`,
-// 		},
-// 		{
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="0", job="app-server", severity="critical"} => 0 @[%v]`,
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="0", job="app-server", severity="critical"} => 1 @[%v]`,
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="pending", group="canary", instance="1", job="app-server", severity="critical"} => 0 @[%v]`,
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="1", job="app-server", severity="critical"} => 1 @[%v]`,
-// 		},
-// 		{
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="1", job="app-server", severity="critical"} => 0 @[%v]`,
-// 			`ALERTS{alertname="HttpRequestRateLow", alertstate="firing", group="canary", instance="0", job="app-server", severity="critical"} => 0 @[%v]`,
-// 		},
-// 		{
-// 		/* empty */
-// 		},
-// 		{
-// 		/* empty */
-// 		},
-// 	}
+		failed := false
+		if len(actualLines) != len(expectedLines) {
+			t.Errorf("%d. Number of samples in expected and actual output don't match (%d vs. %d)", i, len(expectedLines), len(actualLines))
+			failed = true
+		}
 
-// 	storage, closer := newTestStorage(t)
-// 	defer closer.Close()
+		for j, expectedSample := range expectedLines {
+			found := false
+			for _, actualSample := range actualLines {
+				if actualSample == expectedSample {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%d.%d. Couldn't find expected sample in output: '%v'", i, j, expectedSample)
+				failed = true
+			}
+		}
 
-// 	alertExpr, err := LoadExprFromString(`http_requests{group="canary", job="app-server"} < 100`)
-// 	if err != nil {
-// 		t.Fatalf("Unable to parse alert expression: %s", err)
-// 	}
-// 	alertName := "HttpRequestRateLow"
-// 	alertLabels := clientmodel.LabelSet{
-// 		"severity": "critical",
-// 	}
-// 	rule := NewAlertingRule(alertName, alertExpr.(ast.VectorNode), time.Minute, alertLabels, "summary", "description")
-
-// 	for i, expected := range evalOutputs {
-// 		evalTime := testStartTime.Add(testSampleInterval * time.Duration(i))
-// 		actual, err := rule.Eval(evalTime, storage)
-// 		if err != nil {
-// 			t.Fatalf("Error during alerting rule evaluation: %s", err)
-// 		}
-// 		actualLines := strings.Split(actual.String(), "\n")
-// 		expectedLines := annotateWithTime(expected, evalTime)
-// 		if actualLines[0] == "" {
-// 			actualLines = []string{}
-// 		}
-
-// 		failed := false
-// 		if len(actualLines) != len(expectedLines) {
-// 			t.Errorf("%d. Number of samples in expected and actual output don't match (%d vs. %d)", i, len(expectedLines), len(actualLines))
-// 			failed = true
-// 		}
-
-// 		for j, expectedSample := range expectedLines {
-// 			found := false
-// 			for _, actualSample := range actualLines {
-// 				if actualSample == expectedSample {
-// 					found = true
-// 				}
-// 			}
-// 			if !found {
-// 				t.Errorf("%d.%d. Couldn't find expected sample in output: '%v'", i, j, expectedSample)
-// 				failed = true
-// 			}
-// 		}
-
-// 		if failed {
-// 			t.Fatalf("%d. Expected and actual outputs don't match:\n%v", i, vectorComparisonString(expectedLines, actualLines))
-// 		}
-// 	}
-// }
+		if failed {
+			t.Fatalf("%d. Expected and actual outputs don't match:\n%v", i, vectorComparisonString(expectedLines, actualLines))
+		}
+	}
+}

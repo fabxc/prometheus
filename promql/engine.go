@@ -281,8 +281,8 @@ func (ng *Engine) recover(errp *error) {
 	return
 }
 
-// QueryRules returns a query of rule statements.
-func (ng *Engine) QueryRules(qs string) (Query, error) {
+// QueryRules returns a new query of the given query string.
+func (ng *Engine) Query(qs string) (Query, error) {
 	stmts, err := Parse("query", qs)
 	if err != nil {
 		return nil, err
@@ -297,24 +297,25 @@ func (ng *Engine) QueryRules(qs string) (Query, error) {
 	return query, nil
 }
 
-// QueryRulesFromFile reads a file and returns a query of rule statements it contains.
-func (ng *Engine) QueryRulesFromFile(filename string) (Query, error) {
+// QueryFromFile reads a file and returns a query of statements it contains.
+func (ng *Engine) QueryFromFile(filename string) (Query, error) {
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
-	return ng.QueryRules(string(content))
+	return ng.Query(string(content))
 }
 
 // QueryInstant returns an evaluation query for the given expression at the given time.
-func (ng *Engine) QueryInstant(qs string, ts clientmodel.Timestamp) (Query, error) {
-	return ng.QueryRange(qs, ts, ts, 0)
+func (ng *Engine) EvalInstant(es string, ts clientmodel.Timestamp) (Query, error) {
+	return ng.EvalRange(es, ts, ts, 0)
 }
 
-// QueryRange returns an evaluation query for the given time range and with
+// EvalRange returns an evaluation query for the given time range and with
 // the resolution set by the interval.
-func (ng *Engine) QueryRange(qs string, start, end clientmodel.Timestamp, interval time.Duration) (Query, error) {
-	stmts, err := Parse("query", "EVAL "+qs)
+func (ng *Engine) EvalRange(expr string, start, end clientmodel.Timestamp, interval time.Duration) (Query, error) {
+	qs := "EVAL " + expr
+	stmts, err := Parse("query", qs)
 	if err != nil {
 		return nil, err
 	}
@@ -353,8 +354,10 @@ func (ng *Engine) exec(q *query) (res Result) {
 	defer ng.recover(&res.Err)
 
 	ctx, cancel := context.WithTimeout(ng.baseCtx, *defaultQueryTimeout)
-	defer cancel() // Cancel in case an error is raised.
 	q.cancel = cancel
+
+	// Cancel when execution is done or an error was raised.
+	defer cancel()
 
 	q.stats.GetTimer(stats.TotalEvalTime).Start()
 	defer q.stats.GetTimer(stats.TotalEvalTime).Stop()
@@ -386,7 +389,7 @@ func (ng *Engine) exec(q *query) (res Result) {
 				}
 			}
 		case *EvalStmt:
-			// Only one execution statement per query is allowed.
+			// Currently, only one execution statement per query is allowed.
 			return ng.execEvalStmt(q, s, ctx)
 
 		default:
@@ -894,7 +897,7 @@ func (ev *evaluator) vectorElemBinop(op itemType, lhs, rhs clientmodel.SampleVal
 	case itemLTE:
 		return lhs, lhs <= rhs
 	default:
-		ev.ng.errorf("operator %q not allowed for vector elements", op)
+		ev.ng.errorf("operator %q not allowed for operations between vectors", op)
 	}
 	panic("unreachable")
 }
@@ -922,31 +925,10 @@ func (ev *evaluator) aggregation(op itemType, grouping clientmodel.LabelNames, k
 
 	for _, sample := range vector {
 		groupingKey := clientmodel.SignatureForLabels(sample.Metric.Metric, grouping)
-		if groupedResult, ok := result[groupingKey]; ok {
-			if keepExtra {
-				groupedResult.labels = labelIntersection(groupedResult.labels, sample.Metric)
-			}
 
-			switch op {
-			case itemSum:
-				groupedResult.value += sample.Value
-			case itemAvg:
-				groupedResult.value += sample.Value
-				groupedResult.groupCount++
-			case itemMax:
-				if groupedResult.value < sample.Value {
-					groupedResult.value = sample.Value
-				}
-			case itemMin:
-				if groupedResult.value > sample.Value {
-					groupedResult.value = sample.Value
-				}
-			case itemCount:
-				groupedResult.groupCount++
-			default:
-				ev.ng.errorf("expected aggregation operator but got %q", op)
-			}
-		} else {
+		groupedResult, ok := result[groupingKey]
+		// Add a new group if it doesn't exist.
+		if !ok {
 			var m clientmodel.COWMetric
 			if keepExtra {
 				m = sample.Metric
@@ -967,9 +949,35 @@ func (ev *evaluator) aggregation(op itemType, grouping clientmodel.LabelNames, k
 				value:      sample.Value,
 				groupCount: 1,
 			}
+			continue
+		}
+		// Add the sample to the existing group
+		if keepExtra {
+			groupedResult.labels = labelIntersection(groupedResult.labels, sample.Metric)
+		}
+
+		switch op {
+		case itemSum:
+			groupedResult.value += sample.Value
+		case itemAvg:
+			groupedResult.value += sample.Value
+			groupedResult.groupCount++
+		case itemMax:
+			if groupedResult.value < sample.Value {
+				groupedResult.value = sample.Value
+			}
+		case itemMin:
+			if groupedResult.value > sample.Value {
+				groupedResult.value = sample.Value
+			}
+		case itemCount:
+			groupedResult.groupCount++
+		default:
+			ev.ng.errorf("expected aggregation operator but got %q", op)
 		}
 	}
 
+	// Construct the result vector from the aggregated groups.
 	resultVector := make(Vector, 0, len(result))
 
 	for _, aggr := range result {
@@ -1019,6 +1027,7 @@ func (ng *Engine) UnregisterRecordHandler(name string) {
 	ng.Unlock()
 }
 
+// btos returns 1 if b is true, 0 otherwise.
 func btos(b bool) clientmodel.SampleValue {
 	if b {
 		return 1

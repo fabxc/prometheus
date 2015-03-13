@@ -146,7 +146,7 @@ func NewPrometheus() *prometheus {
 		PrometheusURL:       web.MustBuildServerURL(),
 	})
 	for _, rf := range conf.Global.RuleFile {
-		query, err := engine.QueryRulesFromFile(rf)
+		query, err := engine.QueryFromFile(rf)
 		if err != nil {
 			glog.Fatalf("Error loading rule file %q: %s", rf, err)
 		}

@@ -56,7 +56,7 @@ func (q queryResultByLabelSorter) Swap(i, j int) {
 }
 
 func query(q string, timestamp clientmodel.Timestamp, engine *promql.Engine) (queryResult, error) {
-	query, err := engine.QueryInstant(q, timestamp)
+	query, err := engine.EvalInstant(q, timestamp)
 	if err != nil {
 		return nil, err
 	}

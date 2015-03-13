@@ -72,7 +72,6 @@ func Tree(node Node) string {
 }
 
 func tree(node Node, level string) string {
-	nl := level + " · · ·"
 	typs := strings.Split(fmt.Sprintf("%T", node), ".")[1]
 
 	var t string
@@ -83,39 +82,41 @@ func tree(node Node, level string) string {
 		t = fmt.Sprintf("%s |---- %s :: %s\n", level, typs, node)
 	}
 
+	level += " · · ·"
+
 	switch n := node.(type) {
 	case Statements:
 		for _, s := range n {
-			t += tree(s, nl)
+			t += tree(s, level)
 		}
 	case Expressions:
 		for _, e := range n {
-			t += tree(e, nl)
+			t += tree(e, level)
 		}
 	case *AlertStmt:
-		t += tree(n.Expr, nl)
+		t += tree(n.Expr, level)
 
 	case *RecordStmt:
-		t += tree(n.Expr, nl)
+		t += tree(n.Expr, level)
 
 	case *EvalStmt:
-		t += tree(n.Expr, nl)
+		t += tree(n.Expr, level)
 
 	case *ParenExpr:
-		t += tree(n.Expr, nl)
+		t += tree(n.Expr, level)
 
 	case *UnaryExpr:
-		t += tree(n.Expr, nl)
+		t += tree(n.Expr, level)
 
 	case *BinaryExpr:
-		t += tree(n.LHS, nl)
-		t += tree(n.RHS, nl)
+		t += tree(n.LHS, level)
+		t += tree(n.RHS, level)
 
 	case *AggregateExpr:
-		t += tree(n.Expr, nl)
+		t += tree(n.Expr, level)
 
 	case *Call:
-		t += tree(n.Args, nl)
+		t += tree(n.Args, level)
 
 	case *StringLiteral, *NumberLiteral, *VectorSelector, *MatrixSelector:
 		// nothing to do

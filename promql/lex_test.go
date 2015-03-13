@@ -142,6 +142,13 @@ var tests = []struct {
 	},
 	// Test operators.
 	{
+		input:    `=`,
+		expected: []item{{itemAssign, 0, `=`}},
+	}, {
+		// Inside braces equality is a single '=' character.
+		input:    `{=}`,
+		expected: []item{{itemLeftBrace, 0, `{`}, {itemEQL, 1, `=`}, {itemRightBrace, 2, `}`}},
+	}, {
 		input:    `==`,
 		expected: []item{{itemEQL, 0, `==`}},
 	}, {

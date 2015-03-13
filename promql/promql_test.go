@@ -1225,7 +1225,7 @@ func TestExpressions(t *testing.T) {
 	for i, exprTest := range expressionTests {
 		expectedLines := annotateWithTime(exprTest.output, testEvalTime)
 
-		query, err := engine.QueryInstant(exprTest.expr, testEvalTime)
+		query, err := engine.EvalInstant(exprTest.expr, testEvalTime)
 
 		if err != nil {
 			if !exprTest.shouldFail {
@@ -1513,7 +1513,7 @@ func TestRangedEvaluationRegressions(t *testing.T) {
 		storeMatrix(storage, s.in)
 
 		engine := NewEngine(storage)
-		query, err := engine.QueryRange(s.expr, testStartTime, testStartTime.Add(time.Hour), time.Hour)
+		query, err := engine.EvalRange(s.expr, testStartTime, testStartTime.Add(time.Hour), time.Hour)
 		if err != nil {
 			t.Errorf("%d. Error in expression %q", i, s.expr)
 			t.Fatalf("%d. Error parsing expression: %v", i, err)

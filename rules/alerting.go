@@ -128,7 +128,7 @@ func (rule *AlertingRule) Name() string {
 
 // EvalRaw returns the raw value of the rule expression, without creating alerts.
 func (rule *AlertingRule) EvalRaw(timestamp clientmodel.Timestamp, engine *promql.Engine) (promql.Vector, error) {
-	query, err := engine.QueryInstant(rule.Vector.String(), timestamp)
+	query, err := engine.EvalInstant(rule.Vector.String(), timestamp)
 	if err != nil {
 		return nil, err
 	}
