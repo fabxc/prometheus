@@ -209,8 +209,9 @@ func (q *query) Cancel() {
 
 // Exec implements the Query interface.
 func (q *query) Exec() <-chan bool {
+	ctx := q.ng.setupQuery(q)
 	go func() {
-		q.result = q.ng.exec(q)
+		q.result = q.ng.exec(q, ctx)
 		success := q.result.Err == nil
 		q.done <- success
 		q.done <- success
@@ -273,9 +274,11 @@ func (ng *Engine) Stop() {
 func (ng *Engine) recover(errp *error) {
 	e := recover()
 	if e != nil {
+		// Do not recover from runtime errors.
 		if _, ok := e.(runtime.Error); ok {
 			panic(e)
 		}
+		// TODO(fabxc): conversion to custom errors for context deadlines and cancellation?
 		*errp = e.(error)
 	}
 	return
@@ -354,16 +357,24 @@ func (ng *Engine) error(err error) {
 	panic(err)
 }
 
-// exec executes all statements in the query. For evaluation statements only
-// one statement per query is allowed, after which the execution returns.
-func (ng *Engine) exec(q *query) (res Result) {
-	defer ng.recover(&res.Err)
-
+// setupQuery prepares a query for execution using the context. exec is expected
+// to be executed immediately afterwards.
+//
+// This function mainly exists to avoid races when canceling a query shortly after
+// it was started.
+func (ng *Engine) setupQuery(q *query) context.Context {
 	ctx, cancel := context.WithTimeout(ng.baseCtx, *defaultQueryTimeout)
 	q.cancel = cancel
+	return ctx
+}
+
+// exec executes all statements in the query. For evaluation statements only
+// one statement per query is allowed, after which the execution returns.
+func (ng *Engine) exec(q *query, ctx context.Context) (res Result) {
+	defer ng.recover(&res.Err)
 
 	// Cancel when execution is done or an error was raised.
-	defer cancel()
+	defer q.cancel()
 
 	q.stats.GetTimer(stats.TotalEvalTime).Start()
 	defer q.stats.GetTimer(stats.TotalEvalTime).Stop()
