@@ -24,72 +24,93 @@ import (
 )
 
 type parser struct {
-	name      string
-	lex       *lexer
-	stmts     Statements
-	token     [3]item // three-token lookahead for parser.
-	peekCount int
+	name       string
+	lex        *lexer
+	statements Statements
+	expression Expr
+	token      [3]item // three-token lookahead for parser.
+	peekCount  int
 }
 
-// Parse parses the input and returns the resulting statements or any ocurring error.
-func Parse(name, input string) (Statements, error) {
+// ParseStmts parses the input and returns the resulting statements or any ocurring error.
+func ParseStmts(name, input string) (Statements, error) {
 	p := &parser{
-		name:  name,
-		lex:   lex(name, input),
-		stmts: make(Statements, 0),
+		name:       name,
+		lex:        lex(name, input),
+		statements: make(Statements, 0),
 	}
-	err := p.parse()
+	err := p.parseStmts()
 	if err != nil {
-		return p.stmts, err
+		return p.statements, err
 	}
 	err = p.typecheck()
-	return p.stmts, err
+	return p.statements, err
 }
 
-// ParseExpr parses the input expression.
-func ParseExpr(name, input string) (expr Expr, err error) {
+// ParseExpr returns the expression parsed from the input.
+func ParseExpr(name, input string) (Expr, error) {
 	p := &parser{
-		name:  name,
-		lex:   lex(name, input),
-		stmts: make(Statements, 0),
+		name:       name,
+		lex:        lex(name, input),
+		statements: make(Statements, 0),
 	}
 
-	defer p.recover(&err)
-
-	expr = p.expr()
-	p.checkType(expr)
-
-	return
+	err := p.parseExpr()
+	if err != nil {
+		return p.expression, err
+	}
+	err = p.typecheck()
+	return p.expression, err
 }
 
 // NewParser returns a new parser.
 func NewParser(name, input string) *parser {
 	p := &parser{
-		name:  name,
-		lex:   lex(name, input),
-		stmts: make(Statements, 0),
+		name:       name,
+		lex:        lex(name, input),
+		statements: make(Statements, 0),
 	}
 	return p
 }
 
-// parse parses the parser's input and returns any occurring error.
-func (p *parser) parse() (err error) {
+// parseStmts parses a sequence of statements from the input.
+func (p *parser) parseStmts() (err error) {
 	defer p.recover(&err)
 
 	for p.peek().typ != itemEOF {
 		if p.peek().typ == itemComment {
 			continue
 		}
-		p.stmts = append(p.stmts, p.statement())
+		p.statements = append(p.statements, p.stmt())
 	}
 	return nil
 }
 
+// parseExpr parses a single expression from the input.
+func (p *parser) parseExpr() (err error) {
+	defer p.recover(&err)
+
+	for p.peek().typ != itemEOF {
+		if p.peek().typ == itemComment {
+			continue
+		}
+		if p.expression != nil {
+			p.errorf("expression read but input remaining")
+		}
+		p.expression = p.expr()
+	}
+	return nil
+}
+
+// typecheck checks correct typing of the parsed statements or expression.
 func (p *parser) typecheck() (err error) {
 	defer p.recover(&err)
 
-	for _, st := range p.stmts {
+	for _, st := range p.statements {
 		p.checkType(st)
+	}
+	if p.expression != nil {
+		p.checkType(p.expression)
 	}
 	return nil
 }
@@ -184,18 +205,16 @@ func unparen(x Expr) Expr {
 	return x
 }
 
-// statement parses any statement.
+// stmt parses any statement.
 //
-// 		alertStatement | recordStatement | ExecStatement
+// 		alertStatement | recordStatement
 //
-func (p *parser) statement() Statement {
+func (p *parser) stmt() Statement {
 	switch tok := p.peek(); tok.typ {
 	case itemAlert:
 		return p.alertStmt()
 	case itemIdentifier, itemMetricIdentifier:
 		return p.recordStmt()
-	case itemEval:
-		return p.evalStmt()
 	}
 	p.errorf("no valid statement detected")
 	return nil
@@ -279,16 +298,6 @@ func (p *parser) recordStmt() *RecordStmt {
 		Expr:      expr,
 		Permanent: permanent,
 	}
-}
-
-// evalStmt parses an eval statement, indicated by the leading itemEval.
-func (p *parser) evalStmt() *EvalStmt {
-	const ctx = "eval statement"
-
-	p.expect(itemEval, ctx)
-	expr := p.expr()
-
-	return &EvalStmt{Expr: expr}
 }
 
 // expr parses any expression.

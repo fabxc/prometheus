@@ -14,6 +14,7 @@
 package promql
 
 import (
+	"fmt"
 	"time"
 
 	clientmodel "github.com/prometheus/client_golang/model"
@@ -61,14 +62,6 @@ type AlertStmt struct {
 	Description string
 }
 
-// RecordStmt represents an added recording rule.
-type RecordStmt struct {
-	Name      string
-	Expr      Expr
-	Labels    clientmodel.LabelSet
-	Permanent bool // TODO(fabxc): Permanent recording rules are not yet implemented.
-}
-
 // EvalStmt holds an expression and information on the range it should
 // be evaluated on.
 type EvalStmt struct {
@@ -81,8 +74,16 @@ type EvalStmt struct {
 	Interval time.Duration
 }
 
-func (*EvalStmt) stmt()   {}
+// RecordStmt represents an added recording rule.
+type RecordStmt struct {
+	Name      string
+	Expr      Expr
+	Labels    clientmodel.LabelSet
+	Permanent bool // TODO(fabxc): Permanent recording rules are not yet implemented.
+}
+
 func (*AlertStmt) stmt()  {}
+func (*EvalStmt) stmt()   {}
 func (*RecordStmt) stmt() {}
 
 // ExprType is the type an evaluated expression returns.
@@ -318,7 +319,7 @@ func Walk(v Visitor, node Node) {
 		// nothing to do
 
 	default:
-		panic("promql.Walk: unhandled node type")
+		panic(fmt.Errorf("promql.Walk: unhandled node type %T", node))
 	}
 
 	v.Visit(nil)

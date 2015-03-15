@@ -42,7 +42,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	rules, err := promql.Parse("rule_checker", string(content))
+	rules, err := promql.ParseStmts("rule_checker", string(content))
 	if err != nil {
 		glog.Errorf("Error loading rule file %s: %s", *ruleFile, err)
 		os.Exit(1)

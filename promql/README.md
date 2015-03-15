@@ -119,44 +119,8 @@ manager registers handlers with the engine that are called on receiving new rule
 I consider it an easy and flexible way of breaking dependencies and the approach is heavily
 used in camlistore (Brad Fitzpatrick) - so it cannot be completely off.
 
-### Thoughts on the QL
-
-_All Sci-Fi from down here. Brian already mentioned it's out of scope. It has nothing to do with
-the actual refactoring - other than it would be easy to add such extensions._
-
-To me a query language is a set of statements which I can throw at an application
-(e.g. through a shell or file) and they are simply executed. MongoDB, InfluxDB etc. are obvious
-examples. There are statements getting data from the storage but also statements modifying
-or informing about the current state (e.g. `SHOW DATABASES`, `ADD USER`).
-
-An alert statement in general is a command that instructs to set a new alert (its not an alert
-in itself). The current engine reflects that by informing the rule manager on receiving such a statement.
-In contrast, an expression is not a statement. It needs more information to know what to do
-with it, namely an evaluation timestamp or range. However, this is not part of the QL as of
-now. I would vote for having an actual evaluation statement. (Right now the engine uses
-a pseudo-statement. _And I would stick with having it as a statement internally regardless, as
-that's an executable unit._)
-
-An evaluation statement could look like this (naturally timestamps are bad news when typing a
-query manually - in that case duration offsets are probably what you'd want to use anyway):
-
-	// Instant evaluation. Timestamp can also be 'now'
-	[<timestamp>] <expression>
-	[<negative duration>] <expression>
-
-	// Range evaluation in different flavors. Timestamps can also be 'now'.
-	[<start>:<end>:<step>] <expression>
-	[<start>:<positive duration>:<step>] <expression>
-	[<negative duration>:<timestamp>:<step>] <expression>
-	[<negative duration>:<positive duration>:<step>] <expression>
-
-That's not say there cannot be functions like `engine.EvalRange(expr_str, start, end, step)`,
-that are convenient to use from within Go code.
-
-The future may bring more relevant requirements to modify Prometheus's state at runtime or get
-information about it.
-Backing up to long-term storage (now), removing old data (now), or anything that fulfills
-"Do this, now!" and is thus not part of the more static configuration.
-
-The respective endpoints in the engine could obviously easily be used to provide the same data
-over HTTP handlers and whatnot.
+_Had some thoughts on QL here. Brian already noted it is out of scope. Actually, it wasn't 
+relevant to the changes and rather distracting from the actual refactoring. Basically, by
+design it should be very easy to extend the QL with more statements if ever desired.
+The engine processes statements, so evaluating an expression is its own statement - just 
+not one that can be derived from parsing an input._

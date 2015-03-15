@@ -720,13 +720,12 @@ var testExpr = []struct {
 
 func TestParseExpressions(t *testing.T) {
 	for _, test := range testExpr {
-		input := "EVAL " + test.input
 
-		parser := NewParser("test", input)
+		parser := NewParser("test", test.input)
 
-		err := parser.parse()
+		err := parser.parseExpr()
 		if !test.fail && err != nil {
-			t.Errorf("error in input '%s'", input)
+			t.Errorf("error in input '%s'", test.input)
 			t.Fatalf("could not parse: %s", err)
 		}
 		if test.fail && err != nil {
@@ -735,7 +734,7 @@ func TestParseExpressions(t *testing.T) {
 
 		err = parser.typecheck()
 		if !test.fail && err != nil {
-			t.Errorf("error on input '%s'", input)
+			t.Errorf("error on input '%s'", test.input)
 			t.Fatalf("typecheck failed: %s", err)
 		}
 
@@ -743,34 +742,31 @@ func TestParseExpressions(t *testing.T) {
 			if err != nil {
 				continue
 			}
-			t.Errorf("error on input '%s'", input)
-			t.Fatalf("failure expected, but passed")
+			t.Errorf("error on input '%s'", test.input)
+			t.Fatalf("failure expected, but passed with result: %q", parser.expression)
 		}
 
-		expected := &EvalStmt{test.expected.(Expr), 0, 0, 0}
-
-		if !reflect.DeepEqual(parser.stmts[0], expected) {
-			t.Errorf("error on input '%s'", input)
-			t.Fatalf("no match\n\nexpected:\n%s\ngot: \n%s\n", Tree(expected), Tree(parser.stmts[0]))
+		if !reflect.DeepEqual(parser.expression, test.expected) {
+			t.Errorf("error on input '%s'", test.input)
+			t.Fatalf("no match\n\nexpected:\n%s\ngot: \n%s\n", Tree(test.expected), Tree(parser.expression))
 		}
 	}
 }
 
 // NaN has no equality. Thus, we need a separate test for it.
 func TestNaNExpression(t *testing.T) {
-	parser := NewParser("test", "EVAL NaN")
+	parser := NewParser("test", "NaN")
 
-	err := parser.parse()
+	err := parser.parseExpr()
 	if err != nil {
 		t.Errorf("error on input 'NaN'")
 		t.Fatalf("coud not parse: %s", err)
 	}
 
-	stmt := parser.stmts[0].(*EvalStmt)
-	nl, ok := stmt.Expr.(*NumberLiteral)
+	nl, ok := parser.expression.(*NumberLiteral)
 	if !ok {
 		t.Errorf("error on input 'NaN'")
-		t.Fatalf("expected number literal but got %T", stmt.Expr)
+		t.Fatalf("expected number literal but got %T", parser.expression)
 	}
 
 	if !math.IsNaN(float64(nl.N)) {
@@ -956,7 +952,7 @@ func TestParseStatements(t *testing.T) {
 	for _, test := range testStatement {
 		parser := NewParser("test", test.input)
 
-		err := parser.parse()
+		err := parser.parseStmts()
 		if !test.fail && err != nil {
 			t.Errorf("error in input: \n\n%s\n", test.input)
 			t.Fatalf("could not parse: %s", err)
@@ -979,9 +975,9 @@ func TestParseStatements(t *testing.T) {
 			t.Fatalf("failure expected, but passed")
 		}
 
-		if !reflect.DeepEqual(parser.stmts, test.expected) {
+		if !reflect.DeepEqual(parser.statements, test.expected) {
 			t.Errorf("error in input: \n\n%s\n", test.input)
-			t.Fatalf("no match\n\nexpected:\n%s\ngot: \n%s\n", Tree(test.expected), Tree(parser.stmts))
+			t.Fatalf("no match\n\nexpected:\n%s\ngot: \n%s\n", Tree(test.expected), Tree(parser.statements))
 		}
 	}
 }

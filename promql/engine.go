@@ -286,7 +286,7 @@ func (ng *Engine) recover(errp *error) {
 
 // QueryRules returns a new query of the given query string.
 func (ng *Engine) Query(qs string) (Query, error) {
-	stmts, err := Parse("query", qs)
+	stmts, err := ParseStmts("query", qs)
 	if err != nil {
 		return nil, err
 	}

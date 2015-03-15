@@ -142,7 +142,6 @@ const (
 	keywords_start
 	// keywords
 	itemAlert
-	itemEval
 	itemIf
 	itemFor
 	itemWith
@@ -172,7 +171,6 @@ var key = map[string]itemType{
 
 	// keywords
 	"ALERT":         itemAlert,
-	"EVAL":          itemEval,
 	"IF":            itemIf,
 	"FOR":           itemFor,
 	"WITH":          itemWith,
