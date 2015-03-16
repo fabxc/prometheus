@@ -29,9 +29,11 @@ import (
 // to list them as follows:
 //
 // 	- Statements
-// 	- statement types (alphabetical)...
+// 	- statement types (alphabetical)
+// 	- ...
 // 	- Expressions
-// 	- expression types (alphabetical)...
+// 	- expression types (alphabetical)
+// 	- ...
 //
 type Node interface {
 	// String representation of the node that returns the given node when parsed

@@ -117,26 +117,22 @@ func (a *Analyzer) prepare() (local.Preloader, error) {
 
 	// Preload all analyzed ranges.
 	for offset, pt := range a.offsetPreloadTimes {
-		select {
-		case <-a.ctx.Done():
-			return nil, a.ctx.Err()
+		a.ng.checkContext(a.ctx)
 
-		default:
-			start := a.Start.Add(-offset)
-			end := a.End.Add(-offset)
-			for fp, rangeDuration := range pt.ranges {
-				err := p.PreloadRange(fp, start.Add(-rangeDuration), end, *stalenessDelta)
-				if err != nil {
-					p.Close()
-					return nil, err
-				}
+		start := a.Start.Add(-offset)
+		end := a.End.Add(-offset)
+		for fp, rangeDuration := range pt.ranges {
+			err := p.PreloadRange(fp, start.Add(-rangeDuration), end, *stalenessDelta)
+			if err != nil {
+				p.Close()
+				return nil, err
 			}
-			for fp := range pt.instants {
-				err := p.PreloadRange(fp, start, end, *stalenessDelta)
-				if err != nil {
-					p.Close()
-					return nil, err
-				}
+		}
+		for fp := range pt.instants {
+			err := p.PreloadRange(fp, start, end, *stalenessDelta)
+			if err != nil {
+				p.Close()
+				return nil, err
 			}
 		}
 	}

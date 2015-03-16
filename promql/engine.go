@@ -265,6 +265,10 @@ func NewEngine(storage local.Storage) *Engine {
 	}
 }
 
+var (
+	ErrNoHandlers = errors.New("no handlers registered to process query")
+)
+
 // Stop the engine and cancel all running queries.
 func (ng *Engine) Stop() {
 	ng.cancelQueries()
@@ -359,6 +363,19 @@ func (ng *Engine) setupQuery(q *query) context.Context {
 	return ctx
 }
 
+// checkContext raises an error if the context is done or is a no-op otherwise.
+func (ng *Engine) checkContext(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		// TODO(fabxc): maybe map cancel/timeout errors to more human-readable ones.
+		// If so, it should probably be done in Engine.recover.
+		ng.error(ctx.Err())
+	default:
+		// Continue
+	}
+	return
+}
+
 // exec executes all statements in the query. For evaluation statements only
 // one statement per query is allowed, after which the execution returns.
 func (ng *Engine) exec(q *query, ctx context.Context) (res Result) {
@@ -367,33 +384,49 @@ func (ng *Engine) exec(q *query, ctx context.Context) (res Result) {
 	// Cancel when execution is done or an error was raised.
 	defer q.cancel()
 
-	q.stats.GetTimer(stats.TotalEvalTime).Start()
-	defer q.stats.GetTimer(stats.TotalEvalTime).Stop()
+	// The base context might already be canceled (e.g. during shutdown).
+	ng.checkContext(ctx)
+
+	evalTimer := q.stats.GetTimer(stats.TotalEvalTime).Start()
+	defer evalTimer.Stop()
+
+	ng.RLock()
+	alertHandlers := make([]AlertHandler, 0, len(ng.alertHandlers))
+	for _, h := range ng.alertHandlers {
+		alertHandlers = append(alertHandlers, h)
+	}
+	recordHandlers := make([]RecordHandler, 0, len(ng.recordHandlers))
+	for _, h := range ng.recordHandlers {
+		recordHandlers = append(recordHandlers, h)
+	}
+	ng.RUnlock()
 
 	for _, stmt := range q.stmts {
 		switch s := stmt.(type) {
 		case *AlertStmt:
-			for _, h := range ng.alertHandlers {
-				select {
-				case <-ctx.Done():
-					return Result{Err: ctx.Err()}
-				default:
-					err := h(ctx, s)
-					if err != nil {
-						return Result{Err: err}
-					}
+			if len(alertHandlers) == 0 {
+				res.Err = ErrNoHandlers
+				return
+			}
+			for _, h := range alertHandlers {
+				ng.checkContext(ctx)
+				err := h(ctx, s)
+				if err != nil {
+					res.Err = err
+					return
 				}
 			}
 		case *RecordStmt:
-			for _, h := range ng.recordHandlers {
-				select {
-				case <-ctx.Done():
-					return Result{Err: ctx.Err()}
-				default:
-					err := h(ctx, s)
-					if err != nil {
-						return Result{Err: err}
-					}
+			if len(recordHandlers) == 0 {
+				res.Err = ErrNoHandlers
+				return
+			}
+			for _, h := range recordHandlers {
+				ng.checkContext(ctx)
+				err := h(ctx, s)
+				if err != nil {
+					res.Err = err
+					return
 				}
 			}
 		case *EvalStmt:
@@ -429,7 +462,7 @@ func (ng *Engine) execEvalStmt(query *query, s *EvalStmt, ctx context.Context) R
 
 	evalTimer := query.stats.GetTimer(stats.InnerEvalTime).Start()
 	// Instant evaluation.
-	if s.Start == s.End {
+	if s.Start == s.End && s.Interval == 0 {
 		evaluator := ng.evaluator(s.Start, ctx)
 		val := evaluator.eval(s.Expr)
 
@@ -441,32 +474,31 @@ func (ng *Engine) execEvalStmt(query *query, s *EvalStmt, ctx context.Context) R
 	sampleStreams := make(map[clientmodel.Fingerprint]*SampleStream)
 	for ts := s.Start; !ts.After(s.End); ts = ts.Add(s.Interval) {
 
+		ng.checkContext(ctx)
+
 		evaluator := ng.evaluator(ts, ctx)
 		vector := evaluator.evalVector(s.Expr)
 
 		for _, sample := range vector {
-			select {
-			case <-ctx.Done():
-				return Result{Err: ctx.Err()}
-
-			default:
-				samplePair := metric.SamplePair{
-					Value:     sample.Value,
-					Timestamp: sample.Timestamp,
-				}
-				fp := sample.Metric.Metric.Fingerprint()
-				if sampleStreams[fp] == nil {
-					sampleStreams[fp] = &SampleStream{
-						Metric: sample.Metric,
-						Values: metric.Values{samplePair},
-					}
-				} else {
-					sampleStreams[fp].Values = append(sampleStreams[fp].Values, samplePair)
-				}
+			samplePair := metric.SamplePair{
+				Value:     sample.Value,
+				Timestamp: sample.Timestamp,
 			}
+			fp := sample.Metric.Metric.Fingerprint()
+			if sampleStreams[fp] == nil {
+				sampleStreams[fp] = &SampleStream{
+					Metric: sample.Metric,
+					Values: metric.Values{samplePair},
+				}
+			} else {
+				sampleStreams[fp].Values = append(sampleStreams[fp].Values, samplePair)
+			}
+
 		}
 	}
 	evalTimer.Stop()
+
+	ng.checkContext(ctx)
 
 	appendTimer := query.stats.GetTimer(stats.ResultAppendTime).Start()
 	matrix := Matrix{}
@@ -474,6 +506,8 @@ func (ng *Engine) execEvalStmt(query *query, s *EvalStmt, ctx context.Context) R
 		matrix = append(matrix, sampleStream)
 	}
 	appendTimer.Stop()
+
+	ng.checkContext(ctx)
 
 	sortTimer := query.stats.GetTimer(stats.ResultSortTime).Start()
 	sort.Sort(matrix)
@@ -577,12 +611,7 @@ func (ev *evaluator) evalOneOf(e Expr, t1, t2 ExprType) Value {
 func (ev *evaluator) eval(expr Expr) Value {
 	// This is the top-level evaluation method.
 	// Thus, we check for timeout/cancellation here.
-	select {
-	case <-ev.ctx.Done():
-		ev.ng.error(ev.ctx.Err())
-	default:
-		// Go on with evaluation.
-	}
+	ev.ng.checkContext(ev.ctx)
 
 	switch e := expr.(type) {
 	case *AggregateExpr:
@@ -961,7 +990,7 @@ func (ev *evaluator) aggregation(op itemType, grouping clientmodel.LabelNames, k
 			}
 			continue
 		}
-		// Add the sample to the existing group
+		// Add the sample to the existing group.
 		if keepExtra {
 			groupedResult.labels = labelIntersection(groupedResult.labels, sample.Metric)
 		}

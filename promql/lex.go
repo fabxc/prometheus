@@ -193,8 +193,6 @@ var itemTypeStr = map[itemType]string{
 	itemMUL:      "*",
 	itemREM:      "%",
 	itemQUO:      "/",
-	itemLAND:     "AND",
-	itemLOR:      "OR",
 	itemEQL:      "==",
 	itemNEQ:      "!=",
 	itemLTE:      "<-",
@@ -203,11 +201,6 @@ var itemTypeStr = map[itemType]string{
 	itemGTR:      ">",
 	itemEQLRegex: "=~",
 	itemNEQRegex: "!~",
-	itemAvg:      "AVG",
-	itemCount:    "COUNT",
-	itemSum:      "SUM",
-	itemMin:      "MIN",
-	itemMax:      "MAX",
 }
 
 func init() {
