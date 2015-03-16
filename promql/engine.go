@@ -877,15 +877,12 @@ func (ev *evaluator) scalarBinop(op itemType, lhs, rhs clientmodel.SampleValue) 
 	case itemMUL:
 		return lhs * rhs
 	case itemQUO:
-		if rhs != 0 {
-			return lhs / rhs
-		}
-		return clientmodel.SampleValue(math.Inf(int(rhs)))
+		return lhs / rhs
 	case itemREM:
 		if rhs != 0 {
 			return clientmodel.SampleValue(int(lhs) % int(rhs))
 		}
-		return clientmodel.SampleValue(math.Inf(int(rhs)))
+		return clientmodel.SampleValue(math.NaN())
 	case itemEQL:
 		btos(lhs == rhs)
 	case itemNEQ:
@@ -914,15 +911,12 @@ func (ev *evaluator) vectorElemBinop(op itemType, lhs, rhs clientmodel.SampleVal
 	case itemMUL:
 		return lhs * rhs, true
 	case itemQUO:
-		if rhs != 0 {
-			return lhs / rhs, true
-		}
-		return clientmodel.SampleValue(math.Inf(int(rhs))), true
+		return lhs / rhs, true
 	case itemREM:
 		if rhs != 0 {
 			return clientmodel.SampleValue(int(lhs) % int(rhs)), true
 		}
-		return clientmodel.SampleValue(math.Inf(int(rhs))), true
+		return clientmodel.SampleValue(math.NaN()), true
 	case itemEQL:
 		return lhs, lhs == rhs
 	case itemNEQ:
