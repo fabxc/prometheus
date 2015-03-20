@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/retrieval"
 	"github.com/prometheus/prometheus/rules"
+	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/remote/opentsdb"
@@ -138,7 +139,7 @@ func NewPrometheus() *prometheus {
 
 	engine := promql.NewEngine(memStorage)
 
-	ruleManager := manager.NewRuleManager(&manager.RuleManagerOptions{
+	ruleManager := rules.NewRuleManager(&rules.RuleManagerOptions{
 		SampleAppender:      sampleAppender,
 		NotificationHandler: notificationHandler,
 		EvaluationInterval:  conf.EvaluationInterval(),
@@ -234,6 +235,7 @@ func (p *prometheus) Serve() {
 
 	p.targetManager.Stop()
 	p.ruleManager.Stop()
+	p.engine.Stop()
 
 	if err := p.storage.Stop(); err != nil {
 		glog.Error("Error stopping local storage: ", err)

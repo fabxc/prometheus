@@ -26,6 +26,7 @@ import (
 
 	"github.com/prometheus/prometheus/notification"
 	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/templates"
 	"github.com/prometheus/prometheus/utility"
 )
