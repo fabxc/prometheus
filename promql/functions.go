@@ -43,7 +43,7 @@ func funcTime(ev *evaluator, args Expressions) Value {
 	}
 }
 
-// === delta(matrix MatrixNode, isCounter=0 ScalarNode) Vector ===
+// === delta(matrix ExprMatrix, isCounter=0 ExprScalar) Vector ===
 func funcDelta(ev *evaluator, args Expressions) Value {
 	isCounter := len(args) >= 2 && ev.evalInt(args[1]) > 0
 	resultVector := Vector{}
@@ -103,12 +103,12 @@ func funcDelta(ev *evaluator, args Expressions) Value {
 	return resultVector
 }
 
-// === rate(node MatrixNode) Vector ===
+// === rate(node ExprMatrix) Vector ===
 func funcRate(ev *evaluator, args Expressions) Value {
 	args = append(args, &NumberLiteral{1})
 	vector := funcDelta(ev, args).(Vector)
 
-	// TODO: could be other type of MatrixNode in the future (right now, only
+	// TODO: could be other type of ExprMatrix in the future (right now, only
 	// MatrixSelector exists). Find a better way of getting the duration of a
 	// matrix, such as looking at the samples themselves.
 	interval := args[0].(*MatrixSelector).Interval
@@ -118,21 +118,21 @@ func funcRate(ev *evaluator, args Expressions) Value {
 	return vector
 }
 
-// === sort(node VectorNode) Vector ===
+// === sort(node ExprVector) Vector ===
 func funcSort(ev *evaluator, args Expressions) Value {
 	byValueSorter := vectorByValueHeap(ev.evalVector(args[0]))
 	sort.Sort(byValueSorter)
 	return Vector(byValueSorter)
 }
 
-// === sortDesc(node VectorNode) Vector ===
+// === sortDesc(node ExprVector) Vector ===
 func funcSortDesc(ev *evaluator, args Expressions) Value {
 	byValueSorter := vectorByValueHeap(ev.evalVector(args[0]))
 	sort.Sort(sort.Reverse(byValueSorter))
 	return Vector(byValueSorter)
 }
 
-// === topk(k ScalarNode, node VectorNode) Vector ===
+// === topk(k ExprScalar, node ExprVector) Vector ===
 func funcTopk(ev *evaluator, args Expressions) Value {
 	k := ev.evalInt(args[0])
 	if k < 1 {
@@ -154,7 +154,7 @@ func funcTopk(ev *evaluator, args Expressions) Value {
 	return Vector(topk)
 }
 
-// === bottomk(k ScalarNode, node VectorNode) Vector ===
+// === bottomk(k ExprScalar, node ExprVector) Vector ===
 func funcBottomk(ev *evaluator, args Expressions) Value {
 	k := ev.evalInt(args[0])
 	if k < 1 {
@@ -177,7 +177,7 @@ func funcBottomk(ev *evaluator, args Expressions) Value {
 	return Vector(bottomk)
 }
 
-// === drop_common_labels(node VectorNode) Vector ===
+// === drop_common_labels(node ExprVector) Vector ===
 func funcDropCommonLabels(ev *evaluator, args Expressions) Value {
 	vector := ev.evalVector(args[0])
 	if len(vector) < 1 {
@@ -214,7 +214,7 @@ func funcDropCommonLabels(ev *evaluator, args Expressions) Value {
 	return vector
 }
 
-// === round(vector VectorNode, toNearest=1 Scalar) Vector ===
+// === round(vector ExprVector, toNearest=1 Scalar) Vector ===
 func funcRound(ev *evaluator, args Expressions) Value {
 	// round returns a number rounded to toNearest.
 	// Ties are solved by rounding up.
@@ -233,7 +233,7 @@ func funcRound(ev *evaluator, args Expressions) Value {
 	return vector
 }
 
-// === scalar(node VectorNode) Scalar ===
+// === scalar(node ExprVector) Scalar ===
 func funcScalar(ev *evaluator, args Expressions) Value {
 	v := ev.evalVector(args[0])
 	if len(v) != 1 {
@@ -242,7 +242,7 @@ func funcScalar(ev *evaluator, args Expressions) Value {
 	return &Scalar{clientmodel.SampleValue(v[0].Value), ev.Timestamp}
 }
 
-// === count_scalar(vector VectorNode) model.SampleValue ===
+// === count_scalar(vector ExprVector) model.SampleValue ===
 func funcCountScalar(ev *evaluator, args Expressions) Value {
 	return &Scalar{
 		Value:     clientmodel.SampleValue(len(ev.evalVector(args[0]))),
@@ -269,7 +269,7 @@ func aggrOverTime(ev *evaluator, args Expressions, aggrFn func(metric.Values) cl
 	return resultVector
 }
 
-// === avg_over_time(matrix MatrixNode) Vector ===
+// === avg_over_time(matrix ExprMatrix) Vector ===
 func funcAvgOverTime(ev *evaluator, args Expressions) Value {
 	return aggrOverTime(ev, args, func(values metric.Values) clientmodel.SampleValue {
 		var sum clientmodel.SampleValue
@@ -280,14 +280,14 @@ func funcAvgOverTime(ev *evaluator, args Expressions) Value {
 	})
 }
 
-// === count_over_time(matrix MatrixNode) Vector ===
+// === count_over_time(matrix ExprMatrix) Vector ===
 func funcCountOverTime(ev *evaluator, args Expressions) Value {
 	return aggrOverTime(ev, args, func(values metric.Values) clientmodel.SampleValue {
 		return clientmodel.SampleValue(len(values))
 	})
 }
 
-// === floor(vector VectorNode) Vector ===
+// === floor(vector ExprVector) Vector ===
 func funcFloor(ev *evaluator, args Expressions) Value {
 	vector := ev.evalVector(args[0])
 	for _, el := range vector {
@@ -297,7 +297,7 @@ func funcFloor(ev *evaluator, args Expressions) Value {
 	return vector
 }
 
-// === max_over_time(matrix MatrixNode) Vector ===
+// === max_over_time(matrix ExprMatrix) Vector ===
 func funcMaxOverTime(ev *evaluator, args Expressions) Value {
 	return aggrOverTime(ev, args, func(values metric.Values) clientmodel.SampleValue {
 		max := math.Inf(-1)
@@ -308,7 +308,7 @@ func funcMaxOverTime(ev *evaluator, args Expressions) Value {
 	})
 }
 
-// === min_over_time(matrix MatrixNode) Vector ===
+// === min_over_time(matrix ExprMatrix) Vector ===
 func funcMinOverTime(ev *evaluator, args Expressions) Value {
 	return aggrOverTime(ev, args, func(values metric.Values) clientmodel.SampleValue {
 		min := math.Inf(1)
@@ -319,7 +319,7 @@ func funcMinOverTime(ev *evaluator, args Expressions) Value {
 	})
 }
 
-// === sum_over_time(matrix MatrixNode) Vector ===
+// === sum_over_time(matrix ExprMatrix) Vector ===
 func funcSumOverTime(ev *evaluator, args Expressions) Value {
 	return aggrOverTime(ev, args, func(values metric.Values) clientmodel.SampleValue {
 		var sum clientmodel.SampleValue
@@ -330,7 +330,7 @@ func funcSumOverTime(ev *evaluator, args Expressions) Value {
 	})
 }
 
-// === abs(vector VectorNode) Vector ===
+// === abs(vector ExprVector) Vector ===
 func funcAbs(ev *evaluator, args Expressions) Value {
 	vector := ev.evalVector(args[0])
 	for _, el := range vector {
@@ -340,7 +340,7 @@ func funcAbs(ev *evaluator, args Expressions) Value {
 	return vector
 }
 
-// === absent(vector VectorNode) Vector ===
+// === absent(vector ExprVector) Vector ===
 func funcAbsent(ev *evaluator, args Expressions) Value {
 	if len(ev.evalVector(args[0])) > 0 {
 		return Vector{}
@@ -365,7 +365,7 @@ func funcAbsent(ev *evaluator, args Expressions) Value {
 	}
 }
 
-// === ceil(vector VectorNode) Vector ===
+// === ceil(vector ExprVector) Vector ===
 func funcCeil(ev *evaluator, args Expressions) Value {
 	vector := ev.evalVector(args[0])
 	for _, el := range vector {
@@ -375,7 +375,47 @@ func funcCeil(ev *evaluator, args Expressions) Value {
 	return vector
 }
 
-// === deriv(node MatrixNode) Vector ===
+// === exp(vector ExprVector) Vector ===
+func funcExp(ev *evaluator, args Expressions) Value {
+	vector := ev.evalVector(args[0])
+	for _, el := range vector {
+		el.Metric.Delete(clientmodel.MetricNameLabel)
+		el.Value = clientmodel.SampleValue(math.Exp(float64(el.Value)))
+	}
+	return vector
+}
+
+// === ln(vector ExprVector) Vector ===
+func funcLn(ev *evaluator, args Expressions) Value {
+	vector := ev.evalVector(args[0])
+	for _, el := range vector {
+		el.Metric.Delete(clientmodel.MetricNameLabel)
+		el.Value = clientmodel.SampleValue(math.Log(float64(el.Value)))
+	}
+	return vector
+}
+
+// === log2(vector ExprVector) Vector ===
+func funcLog2(ev *evaluator, args Expressions) Value {
+	vector := ev.evalVector(args[0])
+	for _, el := range vector {
+		el.Metric.Delete(clientmodel.MetricNameLabel)
+		el.Value = clientmodel.SampleValue(math.Log2(float64(el.Value)))
+	}
+	return vector
+}
+
+// === log10(vector ExprVector) Vector ===
+func funcLog10(ev *evaluator, args Expressions) Value {
+	vector := ev.evalVector(args[0])
+	for _, el := range vector {
+		el.Metric.Delete(clientmodel.MetricNameLabel)
+		el.Value = clientmodel.SampleValue(math.Log10(float64(el.Value)))
+	}
+	return vector
+}
+
+// === deriv(node ExprMatrix) Vector ===
 func funcDeriv(ev *evaluator, args Expressions) Value {
 	resultVector := Vector{}
 	matrix := ev.evalMatrix(args[0])
@@ -417,7 +457,7 @@ func funcDeriv(ev *evaluator, args Expressions) Value {
 	return resultVector
 }
 
-// === histogram_quantile(k ScalarNode, vector VectorNode) Vector ===
+// === histogram_quantile(k ExprScalar, vector ExprVector) Vector ===
 func funcHistogramQuantile(ev *evaluator, args Expressions) Value {
 	q := clientmodel.SampleValue(ev.evalFloat(args[0]))
 	inVec := ev.evalVector(args[1])
@@ -517,6 +557,12 @@ var functions = map[string]*Function{
 		ReturnType: ExprVector,
 		Call:       funcDropCommonLabels,
 	},
+	"exp": {
+		Name:       "exp",
+		ArgTypes:   []ExprType{ExprVector},
+		ReturnType: ExprVector,
+		Call:       funcExp,
+	},
 	"floor": {
 		Name:       "floor",
 		ArgTypes:   []ExprType{ExprVector},
@@ -528,6 +574,24 @@ var functions = map[string]*Function{
 		ArgTypes:   []ExprType{ExprScalar, ExprVector},
 		ReturnType: ExprVector,
 		Call:       funcHistogramQuantile,
+	},
+	"ln": {
+		Name:       "ln",
+		ArgTypes:   []ExprType{ExprVector},
+		ReturnType: ExprVector,
+		Call:       funcLn,
+	},
+	"log10": {
+		Name:       "log10",
+		ArgTypes:   []ExprType{ExprVector},
+		ReturnType: ExprVector,
+		Call:       funcLog10,
+	},
+	"log2": {
+		Name:       "log2",
+		ArgTypes:   []ExprType{ExprVector},
+		ReturnType: ExprVector,
+		Call:       funcLog2,
 	},
 	"max_over_time": {
 		Name:       "max_over_time",
