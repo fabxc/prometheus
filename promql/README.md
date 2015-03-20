@@ -9,13 +9,19 @@ evaluation, etc.) in one place rather than spreading it across all the nodes' me
 taken by golang's parser, text/template, and InfluxDB.
 I find it has high advantages in terms of maintainability and flexibility.
 
+Engine, lexer, and parser all have a panic-driven control flow (adapted from text/template).
+Panics caused by non-runtime errors are recovered and the error is returned at the respective
+entry point. Downstream of the entry-point there is genereally no way to deal with errors
+and they are usually fatal to the entire parsing or evaluation. Obviously enabling the
+common `err != nil` scheme is still possible for sub-systems (as the `Analyzer` shows).
+
 I also do have dark memories about promising to keep changes small - so consider this a
 concept. Should it be the right direction I'll do my best to split it into digestable
 chunks.
 
 ## Parser and AST
 
-Lexer and parser should both be well tested. As mentioned the parsing now allows keywords
+Lexer and parser should both be well tested. The parser allows keywords
 for label names, handles operator precedence correctly, and supports different number notations
 including hex and octal.
 Adding new functionality might require more LOC than in yacc but is very straightforward and
@@ -24,15 +30,11 @@ as easy as it is now, is also a big advantage.
 
 The AST is slightly more relaxed regarding typing. In total, however, correct
 typing should now be easier to track. By nature parsing and evaluating queries
-involves lots of type-checks at runtime. Thus, over all it seems more important that
-we can easily track where and how types are checked.
+involves lots of type-checks at runtime. Having them now in one place (parser's type-checking stage)
+should make things easier to maintain.
 Golang and InfluxDB use the same approach. It also greatly simplifies things should there
-ever be new value types. In general, it also works more natural with the parser. 
-
-After parsing the whole input, the parser enters its type-checking stage. The fully
-constructed AST is traversed and proper typing is ensured.
-This has the advantage of having all type-checks in a single, maintainable place to
-provide type errors at parsing time.
+ever be new value types (e.g. duration literals).
+In general, it also works more natural with the parser. 
 
 Using the lexed token types directly in the AST was also chosen in Golang and text/template
 and avoids constant mapping between enumerations and having repetitive String methods
@@ -47,16 +49,12 @@ whole explanation might let you think.
 
 ### Functions
 
-Using reflection for functions (like text/template does) was considered. There are few times
-where reflection makes sense. This seemed to be one of it. Having the functions define what
-data they want through their argument types would have been nice.
-In general, though, there are edge cases in `delta` etc. that would make it overly complicated.
-Leaving it as it is seems to provide greater flexibility. However, with the evaluator object,
-evaluating the arguments became a bit cleaner.
-
 Type constraints are now a bit stronger for functions - summed up, giving up a bit here, gaining
 a bit there... it boils down to minor differences that are not all that important
 in practice.
+
+An evaluator is passed instead of a plain timestamp. This makes argument argument evaluations
+cleaner.
 
 ## Engine
 
@@ -124,3 +122,43 @@ relevant to the changes and rather distracting from the actual refactoring. Basi
 design it should be very easy to extend the QL with more statements if ever desired.
 The engine processes statements, so evaluating an expression is its own statement - just 
 not one that can be derived from parsing an input._
+
+## Roadmap
+
+* Per-query timeout
+* Limiting number of concurrent queries
+* Reevaluating which query stats we actually want to collect. Currently the `stats/` package
+  defines way more timers than being used.
+* Agreeing on metrics to export from the engine.
+
+### Metrics
+
+Candidates for metrics include:
+
+* Summaries on the query stats
+* Counter for evaluated/failed queries
+* Gauge of running queries
+
+Possible labels for query metrics:
+
+* Query type (alert, eval, record)
+* Evaluation type (instant, range)
+* Result status (`error = none | parsing | timeout | evaluation`)
+* Labels informing about operations used in evaluated expressions.
+
+## Change overview
+
+* `analyzer.go`: Adjusted to new AST, no changes to behavior.
+* `engine.go`: New `Engine` that handles query processing. Added `evaluator` that includes
+  mostly unchanged evaluation methods from nodes.
+* `functions.go`: Adjusted to new AST/types. No changes in behavior of function
+  implementations.
+* `lex.go`: New custom lexer implementation.
+* `parse.go`: New custom parser implementation.
+* `printer.go`: `String()` and `DotGraph()` methods for AST nodes.
+* `promql_test.go`: Port of end-to-end query evaluation tests (from `rules_test.go`)
+* `setup_test.go`: Setup portion for `promql_test.go` (former `helpers_test.go`)
+* Other test files are new.
+
+Respective changes to other parts of Prometheus to adjust to the Engine interface were made.
+The `rules/` package became significantly slimmer, but the remains have unchanged behavior.
