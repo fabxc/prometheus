@@ -494,6 +494,16 @@ var testExpr = []struct {
 	},
 	// Test matrix selector.
 	{
+		input: "test[5s]",
+		expected: &MatrixSelector{
+			Name:     "test",
+			Offset:   0,
+			Interval: 5 * time.Second,
+			LabelMatchers: metric.LabelMatchers{
+				{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "test"},
+			},
+		},
+	}, {
 		input: "test[5m]",
 		expected: &MatrixSelector{
 			Name:     "test",
@@ -503,23 +513,42 @@ var testExpr = []struct {
 				{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "test"},
 			},
 		},
-	},
-	{
-		input: "test[5m] offset 90s",
+	}, {
+		input: "test[5h] OFFSET 5m",
 		expected: &MatrixSelector{
 			Name:     "test",
-			Offset:   90 * time.Second,
-			Interval: 5 * time.Minute,
+			Offset:   5 * time.Minute,
+			Interval: 5 * time.Hour,
 			LabelMatchers: metric.LabelMatchers{
 				{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "test"},
 			},
 		},
 	}, {
-		input: `test{a="b"}[5m] OFFSET 90s`,
+		input: "test[5d] OFFSET 10s",
 		expected: &MatrixSelector{
 			Name:     "test",
-			Offset:   90 * time.Second,
-			Interval: 5 * time.Minute,
+			Offset:   10 * time.Second,
+			Interval: 5 * 24 * time.Hour,
+			LabelMatchers: metric.LabelMatchers{
+				{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "test"},
+			},
+		},
+	}, {
+		input: "test[5w] offset 2w",
+		expected: &MatrixSelector{
+			Name:     "test",
+			Offset:   14 * 24 * time.Hour,
+			Interval: 5 * 7 * 24 * time.Hour,
+			LabelMatchers: metric.LabelMatchers{
+				{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "test"},
+			},
+		},
+	}, {
+		input: `test{a="b"}[5y] OFFSET 3d`,
+		expected: &MatrixSelector{
+			Name:     "test",
+			Offset:   3 * 24 * time.Hour,
+			Interval: 5 * 365 * 24 * time.Hour,
 			LabelMatchers: metric.LabelMatchers{
 				{Type: metric.Equal, Name: "a", Value: "b"},
 				{Type: metric.Equal, Name: clientmodel.MetricNameLabel, Value: "test"},
@@ -527,6 +556,12 @@ var testExpr = []struct {
 		},
 	}, {
 		input: `foo[5mm]`, fail: true,
+	}, {
+		input: `foo[0m]`, fail: true,
+	}, {
+		input: `foo[5m30s]`, fail: true,
+	}, {
+		input: `foo[5m] OFFSET 1h30m`, fail: true,
 	}, {
 		input: `foo[]`, fail: true,
 	}, {

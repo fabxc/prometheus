@@ -242,7 +242,7 @@ func (p *parser) alertStmt() *AlertStmt {
 	if p.peek().typ == itemFor {
 		p.next()
 		dur := p.expect(itemDuration, ctx)
-		duration, err = time.ParseDuration(dur.val)
+		duration, err = parseDuration(dur.val)
 		if err != nil {
 			p.error(err)
 		}
@@ -426,7 +426,7 @@ func (p *parser) matrixSelector(vs *VectorSelector) *MatrixSelector {
 	var err error
 
 	intervalStr := p.expect(itemDuration, ctx).val
-	interval, err = time.ParseDuration(intervalStr)
+	interval, err = parseDuration(intervalStr)
 	if err != nil {
 		p.error(err)
 	}
@@ -438,7 +438,7 @@ func (p *parser) matrixSelector(vs *VectorSelector) *MatrixSelector {
 		p.next()
 		offi := p.expect(itemDuration, ctx)
 
-		offset, err = time.ParseDuration(offi.val)
+		offset, err = parseDuration(offi.val)
 		if err != nil {
 			p.error(err)
 		}
@@ -741,7 +741,7 @@ func (p *parser) vectorSelector(name string) *VectorSelector {
 		p.next()
 		offi := p.expect(itemDuration, ctx)
 
-		offset, err = time.ParseDuration(offi.val)
+		offset, err = parseDuration(offi.val)
 		if err != nil {
 			p.error(err)
 		}
@@ -870,4 +870,39 @@ func (p *parser) checkType(node Node) (typ ExprType) {
 		p.errorf("unknown node type: %T", node)
 	}
 	return
+}
+
+// parseDuration parses a duration format simpler than the one provided by the time
+// package but with longer units.
+func parseDuration(ds string) (time.Duration, error) {
+	if len(ds) < 2 {
+		return 0, fmt.Errorf("duration string must contain at least %d characters", 2)
+	}
+	n, err := strconv.ParseUint(ds[:len(ds)-1], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("duration must be greater than 0")
+	}
+	dur := time.Duration(n)
+	unit := ds[len(ds)-1]
+
+	switch unit {
+	case 'y':
+		dur *= 365 * 24 * time.Hour
+	case 'w':
+		dur *= 7 * 24 * time.Hour
+	case 'd':
+		dur *= 24 * time.Hour
+	case 'h':
+		dur *= time.Hour
+	case 'm':
+		dur *= time.Minute
+	case 's':
+		dur *= time.Second
+	default:
+		return 0, fmt.Errorf("invalid duration unit %q", unit)
+	}
+	return dur, nil
 }
