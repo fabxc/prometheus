@@ -122,6 +122,10 @@ var testExpr = []struct {
 			},
 		},
 	}, {
+		input: "", fail: true,
+	}, {
+		input: "// just a comment\n\n", fail: true,
+	}, {
 		input: "1+", fail: true,
 	}, {
 		input: "2.5.", fail: true,

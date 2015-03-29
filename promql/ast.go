@@ -283,6 +283,7 @@ func Walk(v Visitor, node Node) {
 	if v = v.Visit(node); v == nil {
 		return
 	}
+
 	switch n := node.(type) {
 	case Statements:
 		for _, s := range n {

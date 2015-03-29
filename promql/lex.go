@@ -300,6 +300,16 @@ func (l *lexer) lineNumber() int {
 	return 1 + strings.Count(l.input[:l.lastPos], "\n")
 }
 
+// linePosition reports at which character in the current line
+// we are on.
+func (l *lexer) linePosition() Pos {
+	lb := Pos(strings.LastIndex(l.input[:l.lastPos], "\n"))
+	if lb == -1 {
+		return l.lastPos
+	}
+	return 1 + l.lastPos - lb
+}
+
 // errorf returns an error token and terminates the scan by passing
 // back a nil pointer that will be the next state, terminating l.nextItem.
 func (l *lexer) errorf(format string, args ...interface{}) stateFn {

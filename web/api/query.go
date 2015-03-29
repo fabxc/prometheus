@@ -154,8 +154,9 @@ func (serv MetricsService) QueryRange(w http.ResponseWriter, r *http.Request) {
 
 	// Align the start to step "tick" boundary.
 	end = end.Add(-time.Duration(end.UnixNano() % int64(step)))
+	start := end.Add(-duration)
 
-	query, err := serv.Engine.EvalRange(expr, start, clientmodel.TimestampFromUnixNano(end), time.Duration(step))
+	query, err := serv.Engine.EvalRange(expr, start, end, step)
 	if err != nil {
 		httpJSONError(w, err, http.StatusBadRequest)
 		return

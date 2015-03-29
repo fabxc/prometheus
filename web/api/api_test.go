@@ -23,6 +23,7 @@ import (
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
+	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage/local"
 )
 
@@ -51,7 +52,7 @@ func TestQuery(t *testing.T) {
 		{
 			queryStr: "",
 			status:   http.StatusOK,
-			bodyRe:   "syntax error",
+			bodyRe:   `{"type":"error","value":"query:1,0 no expression found in input","version":1}`,
 		},
 		{
 			queryStr: "expr=testmetric",
@@ -76,7 +77,7 @@ func TestQuery(t *testing.T) {
 		{
 			queryStr: "expr=(badexpression",
 			status:   http.StatusOK,
-			bodyRe:   "syntax error",
+			bodyRe:   `{"type":"error","value":"query:1,14 unexpected unclosed left paren in paren expression","version":1}`,
 		},
 	}
 
@@ -94,6 +95,7 @@ func TestQuery(t *testing.T) {
 	api := MetricsService{
 		Now:     testNow,
 		Storage: storage,
+		Engine:  promql.NewEngine(storage),
 	}
 	api.RegisterHandler()
 

@@ -99,6 +99,10 @@ func (p *parser) parseExpr() (err error) {
 		}
 		p.expression = p.expr()
 	}
+
+	if p.expression == nil {
+		p.errorf("no expression found in input")
+	}
 	return nil
 }
 
@@ -153,7 +157,7 @@ func (p *parser) backup() {
 
 // errorf formats the error and terminates processing.
 func (p *parser) errorf(format string, args ...interface{}) {
-	format = fmt.Sprintf("query: %s:%d: %s", p.name, p.lex.lineNumber(), format)
+	format = fmt.Sprintf("%s:%d,%d %s", p.name, p.lex.lineNumber(), p.lex.linePosition(), format)
 	panic(fmt.Errorf(format, args...))
 }
 
