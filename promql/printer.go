@@ -25,6 +25,47 @@ import (
 	"github.com/prometheus/prometheus/utility"
 )
 
+func (matrix Matrix) String() string {
+	metricStrings := make([]string, 0, len(matrix))
+	for _, sampleStream := range matrix {
+		metricName, hasName := sampleStream.Metric.Metric[clientmodel.MetricNameLabel]
+		numLabels := len(sampleStream.Metric.Metric)
+		if hasName {
+			numLabels--
+		}
+		labelStrings := make([]string, 0, numLabels)
+		for label, value := range sampleStream.Metric.Metric {
+			if label != clientmodel.MetricNameLabel {
+				labelStrings = append(labelStrings, fmt.Sprintf("%s=%q", label, value))
+			}
+		}
+		sort.Strings(labelStrings)
+		valueStrings := make([]string, 0, len(sampleStream.Values))
+		for _, value := range sampleStream.Values {
+			valueStrings = append(valueStrings,
+				fmt.Sprintf("\n%v @[%v]", value.Value, value.Timestamp))
+		}
+		metricStrings = append(metricStrings,
+			fmt.Sprintf("%s{%s} => %s",
+				metricName,
+				strings.Join(labelStrings, ", "),
+				strings.Join(valueStrings, ", ")))
+	}
+	sort.Strings(metricStrings)
+	return strings.Join(metricStrings, "\n")
+}
+
+func (vector Vector) String() string {
+	metricStrings := make([]string, 0, len(vector))
+	for _, sample := range vector {
+		metricStrings = append(metricStrings,
+			fmt.Sprintf("%s => %v @[%v]",
+				sample.Metric,
+				sample.Value, sample.Timestamp))
+	}
+	return strings.Join(metricStrings, "\n")
+}
+
 // Tree returns a string of the tree structure of the given node.
 func Tree(node Node) string {
 	return tree(node, "")
