@@ -30,9 +30,9 @@ type PrometheusStatusHandler struct {
 	Config      string
 	Flags       map[string]string
 	RuleManager manager.RuleManager
-	TargetPools map[string]*retrieval.TargetPool
+	TargetPools map[string][]retrieval.Target
 
-	Birth time.Time
+	Birth      time.Time
 	PathPrefix string
 }
 

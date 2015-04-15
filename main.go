@@ -77,7 +77,7 @@ var (
 
 type prometheus struct {
 	ruleManager         manager.RuleManager
-	targetManager       retrieval.TargetManager
+	targetManager       *retrieval.TargetManager
 	notificationHandler *notification.NotificationHandler
 	storage             local.Storage
 	remoteStorageQueues []*remote.StorageQueueManager
@@ -152,8 +152,11 @@ func NewPrometheus() *prometheus {
 		sampleAppender = fanout
 	}
 
-	targetManager := retrieval.NewTargetManager(sampleAppender, conf.GlobalLabels())
-	targetManager.AddTargetsFromConfig(conf)
+	targetManager, err := retrieval.NewTargetManager(conf, sampleAppender)
+	if err != nil {
+		glog.Errorf("Error creating target manager: %s", err)
+		os.Exit(1)
+	}
 
 	ruleManager := manager.NewRuleManager(&manager.RuleManagerOptions{
 		SampleAppender:      sampleAppender,
@@ -231,6 +234,7 @@ func (p *prometheus) Serve() {
 	}
 	go p.ruleManager.Run()
 	go p.notificationHandler.Run()
+	go p.targetManager.Run()
 
 	p.storage.Start()
 

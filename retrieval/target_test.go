@@ -18,17 +18,21 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	clientmodel "github.com/prometheus/client_golang/model"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/utility"
 )
 
 func TestBaseLabels(t *testing.T) {
-	target := NewTarget("http://example.com/metrics", 0, clientmodel.LabelSet{"job": "some_job", "foo": "bar"})
+	target := newTestTarget("example.com", 0, clientmodel.LabelSet{"job": "some_job", "foo": "bar"})
 	want := clientmodel.LabelSet{"job": "some_job", "foo": "bar", "instance": "example.com:80"}
 	got := target.BaseLabels()
 	if !reflect.DeepEqual(want, got) {
@@ -42,32 +46,9 @@ func TestBaseLabels(t *testing.T) {
 	}
 }
 
-func TestTargetHidesURLAuth(t *testing.T) {
-	testVectors := []string{"http://secret:data@host.com/query?args#fragment", "https://example.net/foo", "http://foo.com:31337/bar"}
-	testResults := []string{"host.com:80", "example.net:443", "foo.com:31337"}
-	if len(testVectors) != len(testResults) {
-		t.Errorf("Test vector length does not match test result length.")
-	}
-
-	for i := 0; i < len(testVectors); i++ {
-		testTarget := target{
-			state:      Unknown,
-			url:        testVectors[i],
-			httpClient: utility.NewDeadlineClient(0),
-		}
-		u := testTarget.InstanceIdentifier()
-		if u != testResults[i] {
-			t.Errorf("Expected InstanceIdentifier to be %v, actual %v", testResults[i], u)
-		}
-	}
-}
-
 func TestTargetScrapeUpdatesState(t *testing.T) {
-	testTarget := target{
-		state:      Unknown,
-		url:        "bad schema",
-		httpClient: utility.NewDeadlineClient(0),
-	}
+	testTarget := newTestTarget("bad schema", 0, nil)
+
 	testTarget.scrape(nopAppender{})
 	if testTarget.state != Unhealthy {
 		t.Errorf("Expected target state %v, actual: %v", Unhealthy, testTarget.state)
@@ -89,11 +70,7 @@ func TestTargetScrapeWithFullChannel(t *testing.T) {
 	)
 	defer server.Close()
 
-	testTarget := NewTarget(
-		server.URL,
-		10*time.Millisecond,
-		clientmodel.LabelSet{"dings": "bums"},
-	).(*target)
+	testTarget := newTestTarget(server.URL, 10*time.Millisecond, clientmodel.LabelSet{"dings": "bums"})
 
 	testTarget.scrape(slowAppender{})
 	if testTarget.state != Unhealthy {
@@ -105,9 +82,10 @@ func TestTargetScrapeWithFullChannel(t *testing.T) {
 }
 
 func TestTargetRecordScrapeHealth(t *testing.T) {
-	testTarget := NewTarget(
-		"http://example.url", 0, clientmodel.LabelSet{clientmodel.JobLabel: "testjob"},
-	).(*target)
+	jcfg := config.JobConfig{}
+	proto.SetDefaults(&jcfg.JobConfig)
+
+	testTarget := newTestTarget("example.url", 0, clientmodel.LabelSet{clientmodel.JobLabel: "testjob"})
 
 	now := clientmodel.Now()
 	appender := &collectResultAppender{}
@@ -163,7 +141,11 @@ func TestTargetScrapeTimeout(t *testing.T) {
 	)
 	defer server.Close()
 
-	testTarget := NewTarget(server.URL, 10*time.Millisecond, clientmodel.LabelSet{})
+	jcfg := config.JobConfig{}
+	proto.SetDefaults(&jcfg.JobConfig)
+
+	var testTarget Target = newTestTarget(server.URL, 10*time.Millisecond, clientmodel.LabelSet{})
+
 	appender := nopAppender{}
 
 	// scrape once without timeout
@@ -205,24 +187,19 @@ func TestTargetScrape404(t *testing.T) {
 	)
 	defer server.Close()
 
-	testTarget := NewTarget(server.URL, 10*time.Millisecond, clientmodel.LabelSet{})
+	testTarget := newTestTarget(server.URL, 10*time.Millisecond, clientmodel.LabelSet{})
 	appender := nopAppender{}
 
 	want := errors.New("server returned HTTP status 404 Not Found")
-	got := testTarget.(*target).scrape(appender)
+	got := testTarget.scrape(appender)
 	if got == nil || want.Error() != got.Error() {
 		t.Fatalf("want err %q, got %q", want, got)
 	}
 }
 
 func TestTargetRunScraperScrapes(t *testing.T) {
-	testTarget := target{
-		state:           Unknown,
-		url:             "bad schema",
-		httpClient:      utility.NewDeadlineClient(0),
-		scraperStopping: make(chan struct{}),
-		scraperStopped:  make(chan struct{}),
-	}
+	testTarget := newTestTarget("bad schema", 0, nil)
+
 	go testTarget.RunScraper(nopAppender{}, time.Duration(time.Millisecond))
 
 	// Enough time for a scrape to happen.
@@ -253,11 +230,7 @@ func BenchmarkScrape(b *testing.B) {
 	)
 	defer server.Close()
 
-	testTarget := NewTarget(
-		server.URL,
-		100*time.Millisecond,
-		clientmodel.LabelSet{"dings": "bums"},
-	)
+	var testTarget Target = newTestTarget(server.URL, 100*time.Millisecond, clientmodel.LabelSet{"dings": "bums"})
 	appender := nopAppender{}
 
 	b.ResetTimer()
@@ -266,4 +239,23 @@ func BenchmarkScrape(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func newTestTarget(targetURL string, deadline time.Duration, baseLabels clientmodel.LabelSet) *target {
+	t := &target{
+		url: &url.URL{
+			Scheme: "http",
+			Host:   strings.TrimLeft(targetURL, "http://"),
+			Path:   "/metrics",
+		},
+		deadline:        deadline,
+		httpClient:      utility.NewDeadlineClient(deadline),
+		scraperStopping: make(chan struct{}),
+		scraperStopped:  make(chan struct{}),
+	}
+	t.baseLabels = clientmodel.LabelSet{InstanceLabel: clientmodel.LabelValue(t.InstanceIdentifier())}
+	for baseLabel, baseValue := range baseLabels {
+		t.baseLabels[baseLabel] = baseValue
+	}
+	return t
 }

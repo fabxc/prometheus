@@ -15,7 +15,10 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -50,6 +53,20 @@ func (c Config) validateLabels(labels *pb.LabelPairs) error {
 	for _, label := range labels.Label {
 		if !labelNameRE.MatchString(label.GetName()) {
 			return fmt.Errorf("invalid label name '%s'", label.GetName())
+		}
+	}
+	return nil
+}
+
+// validateHosts validates whether a target group contains valid hosts.
+func (c Config) validateHosts(hosts []string) error {
+	if hosts == nil {
+		return nil
+	}
+	for _, host := range hosts {
+		// Make sure that this does not contain any paths or schemes.
+		if strings.Contains(host, "/") {
+			return fmt.Errorf("invalid host '%s', no schemes or paths allowed", host)
 		}
 	}
 	return nil
@@ -92,6 +109,9 @@ func (c Config) Validate() error {
 		for _, targetGroup := range job.TargetGroup {
 			if err := c.validateLabels(targetGroup.Labels); err != nil {
 				return fmt.Errorf("invalid labels for job '%s': %s", job.GetName(), err)
+			}
+			if err := c.validateHosts(targetGroup.Target); err != nil {
+				return fmt.Errorf("invalid targets for job '%s': %s", job.GetName(), err)
 			}
 		}
 		if job.SdName != nil && len(job.TargetGroup) > 0 {
@@ -156,6 +176,11 @@ type JobConfig struct {
 	pb.JobConfig
 }
 
+// SDRefreshInterval gets the the SD refresh interval for a job.
+func (c JobConfig) SDRefreshInterval() time.Duration {
+	return stringToDuration(c.GetSdRefreshInterval())
+}
+
 // ScrapeInterval gets the scrape interval for a job.
 func (c JobConfig) ScrapeInterval() time.Duration {
 	return stringToDuration(c.GetScrapeInterval())
@@ -163,5 +188,36 @@ func (c JobConfig) ScrapeInterval() time.Duration {
 
 // ScrapeTimeout gets the scrape timeout for a job.
 func (c JobConfig) ScrapeTimeout() time.Duration {
-	return stringToDuration(c.GetScrapeInterval())
+	return stringToDuration(c.GetScrapeTimeout())
+}
+
+// TargetGroups returns the encapsulated target groups with sorted targets.
+func (c JobConfig) TargetGroups() (groups []*TargetGroup) {
+	for _, tg := range c.GetTargetGroup() {
+		g := &TargetGroup{*tg, ""}
+		sort.Strings(g.Target)
+		groups = append(groups, g)
+	}
+	return
+}
+
+// TargetGroup encapsulates the protobuf TargetGroup and attaches a source to it
+// that identifies the origin of the group.
+type TargetGroup struct {
+	pb.TargetGroup
+	// Source is assigned by the entity defining the target group initially.
+	// TargetGroup with the same source should refer to the same set of targets.
+	Source string
+}
+
+func (tg *TargetGroup) LabelSet() clientmodel.LabelSet {
+	lset := make(clientmodel.LabelSet)
+	for _, pair := range tg.GetLabels().GetLabel() {
+		lset[clientmodel.LabelName(pair.GetName())] = clientmodel.LabelValue(pair.GetValue())
+	}
+	return lset
+}
+
+func (tg *TargetGroup) Equal(other *TargetGroup) bool {
+	return reflect.DeepEqual(tg, other)
 }

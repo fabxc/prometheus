@@ -19,7 +19,6 @@ import (
 
 func TestInterfaces(t *testing.T) {
 	var (
-		_ Target        = &target{}
-		_ TargetManager = &targetManager{}
+		_ Target = &target{}
 	)
 }
