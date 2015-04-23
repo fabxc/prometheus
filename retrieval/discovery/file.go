@@ -20,9 +20,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-fsnotify/fsnotify"
 	"github.com/golang/glog"
+
+	clientmodel "github.com/prometheus/client_golang/model"
 
 	"github.com/prometheus/prometheus/config"
 	pb "github.com/prometheus/prometheus/config/generated"
@@ -47,7 +50,7 @@ type FileDiscoveryConfig struct {
 
 func NewFileDiscovery(cfg *FileDiscoveryConfig) (*FileDiscovery, error) {
 	fd := &FileDiscovery{
-		paths: files,
+		paths: cfg.Files,
 		done:  make(chan struct{}),
 	}
 	return fd, nil
@@ -55,20 +58,33 @@ func NewFileDiscovery(cfg *FileDiscoveryConfig) (*FileDiscovery, error) {
 
 // Sources implements the TargetProvider interface.
 func (fd *FileDiscovery) Sources() []string {
-	return fd.listFiles()
+	var srcs []string
+	// As we allow multiple target groups per file we have no choice
+	// but to parse them all.
+	for _, p := range fd.listFiles() {
+		tgroups, err := fd.readFile(p)
+		if err != nil {
+			glog.Errorf("Error reading file %q: ", p, err)
+		}
+		for _, tg := range tgroups {
+			srcs = append(srcs, tg.Source)
+		}
+	}
+	return srcs
 }
 
 // listFiles returns a list of all files that match the configured patterns.
-func (fd *FileDiscovery) listFiles() ([]string, error) {
+func (fd *FileDiscovery) listFiles() []string {
 	var paths []string
 	for _, p := range fd.paths {
 		files, err := filepath.Glob(p)
 		if err != nil {
-			return nil, err
+			glog.Errorf("Error expanding glob %q: %s", p, err)
+			continue
 		}
-		srcs = append(srcs, files...)
+		paths = append(paths, files...)
 	}
-	return paths, nil
+	return paths
 }
 
 // watchFiles sets watches on all full paths or directories that were configured for
@@ -143,11 +159,10 @@ func (fd *FileDiscovery) Run(ch chan<- *config.TargetGroup) {
 
 // refresh reads all files matching the discoveries patterns and sends the respective
 // updated target groups through the channel.
-func (fd *FileDiscovery) refresh(ch <-chan *config.TargetGroup) {
+func (fd *FileDiscovery) refresh(ch chan<- *config.TargetGroup) {
 	ref := map[string]int{}
 
-	for _, f := range fd.listFiles() {
-		// We have to perform an initial read.
+	for _, p := range fd.listFiles() {
 		tgroups, err := fd.readFile(p)
 		if err != nil {
 			glog.Errorf("Error reading file %q: ", p, err)
@@ -155,9 +170,9 @@ func (fd *FileDiscovery) refresh(ch <-chan *config.TargetGroup) {
 			// file in the future.
 		}
 		for _, tg := range tgroups {
-			up <- tg
+			ch <- tg
 		}
-		ref[f] = len(tgroups)
+		ref[p] = len(tgroups)
 	}
 	// Send empty updates for sources that disappeared.
 	for f, n := range fd.lastRefresh {
@@ -189,7 +204,7 @@ func (fd *FileDiscovery) Stop() {
 func (fd *FileDiscovery) readFile(filename string) ([]*config.TargetGroup, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var targetGroups []*pb.TargetGroup
@@ -197,7 +212,7 @@ func (fd *FileDiscovery) readFile(filename string) ([]*config.TargetGroup, error
 	switch ext := filepath.Ext(filename); ext {
 	case ".json":
 		dec := json.NewDecoder(f)
-		if err := dec.Decode(&targetGroup); err != nil {
+		if err := dec.Decode(&targetGroups); err != nil {
 			return nil, err
 		}
 	case ".pb":
