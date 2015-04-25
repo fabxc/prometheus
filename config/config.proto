@@ -76,7 +76,7 @@ message ScrapeConfig {
 	// List of labeled target groups for this job.
 	repeated TargetGroup target_group = 5;
 	// The HTTP resource path on which to fetch metrics from targets.
-	optional string metrics_path = 6 [default = "/metrics"];
+	optional string default_metrics_path = 6 [default = "/metrics"];
 	// The URL scheme with which to fetch metrics from targets.
 	optional string scheme = 8 [default = "http"];
 }

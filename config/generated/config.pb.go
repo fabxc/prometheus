@@ -196,7 +196,7 @@ type ScrapeConfig struct {
 	// List of labeled target groups for this job.
 	TargetGroup []*TargetGroup `protobuf:"bytes,5,rep,name=target_group" json:"target_group,omitempty"`
 	// The HTTP resource path on which to fetch metrics from targets.
-	MetricsPath *string `protobuf:"bytes,6,opt,name=metrics_path,def=/metrics" json:"metrics_path,omitempty"`
+	DefaultMetricsPath *string `protobuf:"bytes,6,opt,name=default_metrics_path,def=/metrics" json:"default_metrics_path,omitempty"`
 	// The URL scheme with which to fetch metrics from targets.
 	Scheme           *string `protobuf:"bytes,8,opt,name=scheme,def=http" json:"scheme,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
