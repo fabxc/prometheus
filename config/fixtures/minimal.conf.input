@@ -13,7 +13,7 @@ global <
 scrape_config: <
   job_name: "prometheus"
   scrape_interval: "15s"
-  default_metrics_path: "/metrics"
+  metrics_path: "/metrics"
   scheme: "http"
 
   target_group: <

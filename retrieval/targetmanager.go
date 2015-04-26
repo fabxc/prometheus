@@ -326,9 +326,17 @@ func (tm *TargetManager) targetsFromGroup(tg *config.TargetGroup, cfg *config.Sc
 			}
 		}
 
-		address, ok := labels[clientmodel.AddressLabel]
-		if !ok {
+		if _, ok := labels[clientmodel.AddressLabel]; !ok {
 			return nil, fmt.Errorf("Instance %d in target group %s has no address", i, tg)
+		}
+
+		labels, err := Relabel(labels, cfg.RelabelConfigs()...)
+		if err != nil {
+			return nil, fmt.Errorf("Error on relabelling instance %d in target group %s: %s", i, tg, err)
+		}
+		// Check if the target was dropped.
+		if labels == nil {
+			continue
 		}
 
 		for ln := range labels {
@@ -338,8 +346,8 @@ func (tm *TargetManager) targetsFromGroup(tg *config.TargetGroup, cfg *config.Sc
 				delete(labels, ln)
 			}
 		}
-		targets = append(targets, NewTarget(string(address), cfg, labels))
-
+		tr := NewTarget(cfg, labels)
+		targets = append(targets, tr)
 	}
 
 	return targets, nil
