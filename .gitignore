@@ -17,6 +17,9 @@
 .*.swp
 .*.swo
 
+pkg
+bin
+
 .DS_Store
 ._*
 .nfs.*
