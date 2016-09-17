@@ -15,23 +15,25 @@ type Encoding uint8
 
 func (e Encoding) String() string {
 	switch e {
-	case EncodingNone:
+	case EncNone:
 		return "none"
-	case EncodingPlain:
+	case EncPlain:
 		return "plain"
+	case EncFloatXOR:
+		return "floatXOR"
+	case EncDoubleDelta:
+		return "doubleDelta"
 	}
 	return "<unknown>"
 }
 
 // The different available chunk encodings.
 const (
-	EncodingNone Encoding = iota
-	EncodingPlain
+	EncNone Encoding = iota
+	EncPlain
+	EncFloatXOR
+	EncDoubleDelta
 )
-
-func NewPlainChunk(sz int) Chunk {
-	return newPlainChunk(sz)
-}
 
 var (
 	// ErrChunkFull is returned if the remaining size of a chunk cannot
@@ -55,7 +57,7 @@ type Iterator interface {
 	// Next returns the next sample pair in the iterator.
 	Next() (model.SamplePair, bool)
 
-	// SeekPrev(model.Time) (model.SamplePair, bool)
+	// SeekBefore(model.Time) (model.SamplePair, bool)
 	// First() (model.SamplePair, bool)
 	// Last() (model.SamplePair, bool)
 
@@ -102,21 +104,24 @@ func (c *rawChunk) append(b []byte) error {
 	return nil
 }
 
-// plainChunk implements a Chunk using simple 16 byte representations
+// PlainChunk implements a Chunk using simple 16 byte representations
 // of sample pairs.
-type plainChunk struct {
+type PlainChunk struct {
 	rawChunk
 }
 
-func newPlainChunk(sz int) *plainChunk {
-	return &plainChunk{rawChunk: newRawChunk(sz)}
+// NewPlainChunk returns a new chunk using EncPlain.
+func NewPlainChunk(sz int) *PlainChunk {
+	return &PlainChunk{rawChunk: newRawChunk(sz)}
 }
 
-func (c *plainChunk) Iterator() Iterator {
+// Iterator implements the Chunk interface.
+func (c *PlainChunk) Iterator() Iterator {
 	return &plainChunkIterator{c: c.rawChunk.d[:c.l]}
 }
 
-func (c *plainChunk) Appender() Appender {
+// Appender implements the Chunk interface.
+func (c *PlainChunk) Appender() Appender {
 	return &plainChunkAppender{c: &c.rawChunk}
 }
 

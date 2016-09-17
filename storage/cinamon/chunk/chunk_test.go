@@ -24,7 +24,7 @@ func TestRawChunkAppend(t *testing.T) {
 }
 
 func TestPlainAppender(t *testing.T) {
-	c := newPlainChunk(3*16 + 1)
+	c := NewPlainChunk(3*16 + 1)
 	a := c.Appender()
 
 	require.NoError(t, a.Append(1, 1))
@@ -45,7 +45,7 @@ func TestPlainAppender(t *testing.T) {
 }
 
 func TestPlainIterator(t *testing.T) {
-	c := newPlainChunk(100*16 + 1)
+	c := NewPlainChunk(100*16 + 1)
 	a := c.Appender()
 
 	var exp []model.SamplePair
@@ -75,7 +75,7 @@ func TestPlainIterator(t *testing.T) {
 }
 
 func BenchmarkPlainIterator(b *testing.B) {
-	c := newPlainChunk(1000*16 + 1)
+	c := NewPlainChunk(1000*16 + 1)
 	a := c.Appender()
 
 	var exp []model.SamplePair
