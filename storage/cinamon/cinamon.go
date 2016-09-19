@@ -4,8 +4,10 @@ package cinamon
 import (
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fabxc/tindex"
+	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/cinamon/chunk"
 )
@@ -14,8 +16,9 @@ import (
 type Cinamon struct {
 	mtx sync.RWMutex
 
-	index     *tindex.Index
-	memChunks *memChunks
+	index       *tindex.Index
+	memChunks   *memChunks
+	persistence *persistence
 }
 
 // Open or create a new Cinamon storage.
@@ -24,16 +27,30 @@ func Open(path string) (*Cinamon, error) {
 	if err != nil {
 		return nil, err
 	}
+	pers, err := newPersistence(filepath.Join(path, "chunks"), defaultIndexerQsize, defaultIndexerTimeout)
+	if err != nil {
+		return nil, err
+	}
 	c := &Cinamon{
-		index:     ix,
-		memChunks: newMemChunks(ix, 10),
+		index:       ix,
+		memChunks:   newMemChunks(ix, pers, 10),
+		persistence: pers,
 	}
 	return c, nil
 }
 
+// Stop the storage and persist all writes.
 func (c *Cinamon) Stop() error {
+	// TODO(fabxc): blocking further writes here necessary?
 	c.memChunks.indexer.wait()
-	return c.index.Close()
+	c.persistence.wait()
+
+	err0 := c.index.Close()
+	err1 := c.persistence.close()
+	if err0 != nil {
+		return err0
+	}
+	return err1
 }
 
 // memChunks holds the chunks that are currently being appended to.
@@ -51,13 +68,15 @@ type memChunks struct {
 	shards []*memChunksShard
 
 	indexer *indexer
+	pers    *persistence
 }
 
 // newMemChunks returns a new memChunks sharded by n locks.
-func newMemChunks(ix *tindex.Index, n uint8) *memChunks {
+func newMemChunks(ix *tindex.Index, p *persistence, n uint8) *memChunks {
 	c := &memChunks{
 		num:    n,
 		chunks: map[ChunkID]*chunkDesc{},
+		pers:   p,
 	}
 	c.indexer = newMetricIndexer(ix, c, &indexerOpts{
 		qsize:   defaultIndexerQsize,
@@ -95,6 +114,7 @@ func (mc *memChunks) append(m model.Metric, ts model.Time, v model.SampleValue) 
 	// Chunk was full, remove it so a new head chunk can be created.
 	// TODO(fabxc): schedule for persistence.
 	cs.del(fp, chkd)
+	mc.pers.enqueue(chkd)
 
 	// Create a new chunk lazily and continue.
 	chkd, created = cs.get(fp, m)
@@ -152,7 +172,7 @@ func (cs *memChunksShard) del(fp model.Fingerprint, chkd *chunkDesc) {
 }
 
 // ChunkID is a unique identifier for a chunk.
-type ChunkID tindex.DocID
+type ChunkID uint64
 
 // chunkDesc wraps a plain data chunk and provides cached meta data about it.
 type chunkDesc struct {
@@ -225,4 +245,100 @@ func (s *Scrape) Add(m model.Metric, v model.SampleValue) {
 	// TODO(fabxc): pre-sort added samples into the correct buckets
 	// of fingerprint shards so we only have to lock each memChunkShard once.
 	s.m = append(s.m, sample{met: m, val: v})
+}
+
+type chunkBatchProcessor struct {
+	processf func(...*chunkDesc) error
+
+	mtx    sync.RWMutex
+	logger log.Logger
+	q      []*chunkDesc
+
+	qcap    int
+	timeout time.Duration
+
+	timer   *time.Timer
+	trigger chan struct{}
+	empty   chan struct{}
+}
+
+func newChunkBatchProcessor(l log.Logger, cap int, to time.Duration) *chunkBatchProcessor {
+	if l == nil {
+		l = log.NewNopLogger()
+	}
+	p := &chunkBatchProcessor{
+		logger:  l,
+		qcap:    cap,
+		timeout: to,
+		timer:   time.NewTimer(to),
+		trigger: make(chan struct{}, 1),
+		empty:   make(chan struct{}),
+	}
+	// Start with closed channel so we don't block on wait if nothing
+	// has ever been indexed.
+	close(p.empty)
+
+	go p.run()
+	return p
+}
+
+func (p *chunkBatchProcessor) run() {
+	for {
+		// Process pending indexing batch if triggered
+		// or timeout since last indexing has passed.
+		select {
+		case <-p.trigger:
+		case <-p.timer.C:
+		}
+
+		if err := p.process(); err != nil {
+			p.logger.
+				With("err", err).With("num", len(p.q)).
+				Error("batch failed, dropping chunks descs")
+		}
+	}
+}
+
+func (p *chunkBatchProcessor) process() error {
+	// TODO(fabxc): locking the entire time will cause lock contention.
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	if len(p.q) == 0 {
+		return nil
+	}
+	// Leave chunk descs behind whether successful or not.
+	defer func() {
+		p.q = p.q[:0]
+		close(p.empty)
+	}()
+
+	return p.processf(p.q...)
+}
+
+func (p *chunkBatchProcessor) enqueue(cds ...*chunkDesc) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	if len(p.q) == 0 {
+		p.timer.Reset(p.timeout)
+		p.empty = make(chan struct{})
+	}
+
+	p.q = append(p.q, cds...)
+	if len(p.q) > p.qcap {
+		select {
+		case p.trigger <- struct{}{}:
+		default:
+			// If we cannot send a signal is already set.
+		}
+	}
+}
+
+// wait blocks until the queue becomes empty.
+func (p *chunkBatchProcessor) wait() {
+	p.mtx.RLock()
+	c := p.empty
+	p.mtx.RUnlock()
+	<-c
 }
