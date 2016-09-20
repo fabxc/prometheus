@@ -44,7 +44,6 @@ var (
 // Chunk holds a sequence of sample pairs that can be iterated over and appended to.
 type Chunk interface {
 	Data() []byte
-	Len() int
 	Appender() Appender
 	Iterator() Iterator
 }
@@ -67,9 +66,9 @@ type Iterator interface {
 	Err() error
 }
 
-// Appender adds a sample pair to a chunk.
+// Appender adds sample pairs to a chunk.
 type Appender interface {
-	Append(ts model.Time, v model.SampleValue) error
+	Append(model.Time, model.SampleValue) error
 }
 
 // rawChunk provides a basic byte slice and is used by higher-level
@@ -80,16 +79,18 @@ type rawChunk struct {
 	l uint64
 }
 
-func newRawChunk(sz int) rawChunk {
-	return rawChunk{d: make([]byte, sz)}
+func newRawChunk(sz int, enc Encoding) rawChunk {
+	c := rawChunk{d: make([]byte, sz), l: 1}
+	c.d[0] = byte(enc)
+	return c
+}
+
+func (c *rawChunk) encoding() Encoding {
+	return Encoding(c.d[0])
 }
 
 func (c *rawChunk) Data() []byte {
 	return c.d[:c.l]
-}
-
-func (c *rawChunk) Len() int {
-	return int(c.l)
 }
 
 func (c *rawChunk) append(b []byte) error {
@@ -112,12 +113,12 @@ type PlainChunk struct {
 
 // NewPlainChunk returns a new chunk using EncPlain.
 func NewPlainChunk(sz int) *PlainChunk {
-	return &PlainChunk{rawChunk: newRawChunk(sz)}
+	return &PlainChunk{rawChunk: newRawChunk(sz, EncPlain)}
 }
 
 // Iterator implements the Chunk interface.
 func (c *PlainChunk) Iterator() Iterator {
-	return &plainChunkIterator{c: c.rawChunk.d[:c.l]}
+	return &plainChunkIterator{c: c.d[1:c.l]}
 }
 
 // Appender implements the Chunk interface.
@@ -126,17 +127,15 @@ func (c *PlainChunk) Appender() Appender {
 }
 
 type plainChunkAppender struct {
-	c       *rawChunk
-	pos     int
-	curTime model.Time
-	curVal  model.SampleValue
+	c *rawChunk
 }
 
-func (ap *plainChunkAppender) Append(ts model.Time, v model.SampleValue) error {
+// Append implements the Appender interface,
+func (a *plainChunkAppender) Append(ts model.Time, v model.SampleValue) error {
 	b := make([]byte, 16)
 	binary.LittleEndian.PutUint64(b, uint64(ts))
 	binary.LittleEndian.PutUint64(b[8:], math.Float64bits(float64(v)))
-	return ap.c.append(b)
+	return a.c.append(b)
 }
 
 type plainChunkIterator struct {

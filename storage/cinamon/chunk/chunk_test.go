@@ -11,16 +11,15 @@ import (
 )
 
 func TestRawChunkAppend(t *testing.T) {
-	c := newRawChunk(0)
+	c := newRawChunk(1, 'a')
 	require.NoError(t, c.append(nil))
 	require.Error(t, c.append([]byte("t")))
 
-	c = newRawChunk(4)
+	c = newRawChunk(5, 'a')
 	require.NoError(t, c.append([]byte("test")))
 	require.Error(t, c.append([]byte("x")))
-	require.Equal(t, rawChunk{d: []byte("test"), l: 4}, c)
-	require.Equal(t, []byte("test"), c.Data())
-	require.Equal(t, 4, c.Len())
+	require.Equal(t, rawChunk{d: []byte("atest"), l: 5}, c)
+	require.Equal(t, []byte("atest"), c.Data())
 }
 
 func TestPlainAppender(t *testing.T) {
@@ -32,7 +31,7 @@ func TestPlainAppender(t *testing.T) {
 	require.NoError(t, a.Append(3, 3))
 	require.Equal(t, ErrChunkFull, a.Append(4, 4))
 
-	var exp []byte
+	exp := []byte{byte(EncPlain)}
 	b := make([]byte, 8)
 	for i := 1; i <= 3; i++ {
 		binary.LittleEndian.PutUint64(b, uint64(i))
@@ -41,7 +40,6 @@ func TestPlainAppender(t *testing.T) {
 		exp = append(exp, b...)
 	}
 	require.Equal(t, exp, c.Data())
-	require.Equal(t, 3*16, c.Len())
 }
 
 func TestPlainIterator(t *testing.T) {
