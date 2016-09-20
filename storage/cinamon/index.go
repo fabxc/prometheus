@@ -44,15 +44,14 @@ func (ix *indexer) index(cds ...*chunkDesc) error {
 	if err != nil {
 		return err
 	}
-	for _, cd := range cds {
+	ids := make(ChunkID, len(cds))
+	for i, cd := range cds {
 		terms := make(tindex.Terms, 0, len(cd.met))
 		for k, v := range cd.met {
 			t := tindex.Term{Field: string(k), Val: string(v)}
 			terms = append(terms, t)
 		}
-
-		id := b.Add(terms)
-		atomic.StoreUint64((*uint64)(&cd.id), uint64(id))
+		ids[i] := b.Add(terms)
 	}
 
 	if err := b.Commit(); err != nil {
@@ -62,7 +61,8 @@ func (ix *indexer) index(cds ...*chunkDesc) error {
 	ix.mc.mtx.Lock()
 	defer ix.mc.mtx.Unlock()
 
-	for _, cd := range cds {
+	for i, cd := range cds {
+		atomic.StoreUint64((*uint64)(&cd.id), uint64(ids[i]))
 		ix.mc.chunks[cd.id] = cd
 	}
 	return nil

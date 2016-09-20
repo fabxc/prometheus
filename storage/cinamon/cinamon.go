@@ -67,23 +67,23 @@ type memChunks struct {
 	// where the metric is known but the chunk ID is not.
 	shards []*memChunksShard
 
-	indexer *indexer
-	pers    *persistence
+	indexer     *indexer
+	persistence *persistence
 }
 
 // newMemChunks returns a new memChunks sharded by n locks.
 func newMemChunks(ix *tindex.Index, p *persistence, n uint8) *memChunks {
 	c := &memChunks{
-		num:    n,
-		chunks: map[ChunkID]*chunkDesc{},
-		pers:   p,
+		num:         n,
+		chunks:      map[ChunkID]*chunkDesc{},
+		persistence: p,
 	}
 	c.indexer = newMetricIndexer(ix, c, &indexerOpts{
 		qsize:   defaultIndexerQsize,
 		timeout: defaultIndexerTimeout,
 	})
 
-	if n > 64 {
+	if n > 63 {
 		panic("invalid shard power")
 	}
 
@@ -112,9 +112,8 @@ func (mc *memChunks) append(m model.Metric, ts model.Time, v model.SampleValue) 
 		return err
 	}
 	// Chunk was full, remove it so a new head chunk can be created.
-	// TODO(fabxc): schedule for persistence.
 	cs.del(fp, chkd)
-	mc.pers.enqueue(chkd)
+	mc.persistence.enqueue(chkd)
 
 	// Create a new chunk lazily and continue.
 	chkd, created = cs.get(fp, m)
