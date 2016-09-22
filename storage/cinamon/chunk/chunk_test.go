@@ -102,7 +102,6 @@ func benchmarkIterator(b *testing.B, newChunk func(int) Chunk) {
 		}
 		chunks = append(chunks, c)
 	}
-	fmt.Println("created chunks", len(chunks))
 
 	b.ReportAllocs()
 	b.ResetTimer()

@@ -17,6 +17,9 @@ func testDoubleDeltaChunk(t *testing.T) {
 	for i := 0; i < 2000; i++ {
 		ts += model.Time(rand.Int63n(100) + 1)
 		v += rand.Int63n(1000)
+		if rand.Int() > 0 {
+			v *= -1
+		}
 
 		input = append(input, model.SamplePair{
 			Timestamp: ts,
@@ -24,7 +27,7 @@ func testDoubleDeltaChunk(t *testing.T) {
 		})
 	}
 
-	c := NewDoubleDeltaChunk(100 + rand.Intn(3000))
+	c := NewDoubleDeltaChunk(rand.Intn(3000))
 
 	app := c.Appender()
 	for i, s := range input {
@@ -36,7 +39,7 @@ func testDoubleDeltaChunk(t *testing.T) {
 		require.NoError(t, err, "at sample %d: %v", i, s)
 	}
 
-	var result []model.SamplePair
+	result := []model.SamplePair{}
 
 	it := c.Iterator()
 	for s, ok := it.First(); ok; s, ok = it.Next() {
