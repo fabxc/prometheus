@@ -57,7 +57,7 @@ type Iterator interface {
 	Next() (model.SamplePair, bool)
 
 	// SeekBefore(model.Time) (model.SamplePair, bool)
-	// First() (model.SamplePair, bool)
+	First() (model.SamplePair, bool)
 	// Last() (model.SamplePair, bool)
 
 	// Err returns a non-nil error if Next or Seek returned false.
@@ -154,6 +154,11 @@ func (it *plainChunkIterator) timeAt(pos int) model.Time {
 
 func (it *plainChunkIterator) valueAt(pos int) model.SampleValue {
 	return model.SampleValue(math.Float64frombits(binary.LittleEndian.Uint64(it.c[pos:])))
+}
+
+func (it *plainChunkIterator) First() (model.SamplePair, bool) {
+	it.pos = 0
+	return it.Next()
 }
 
 func (it *plainChunkIterator) Seek(ts model.Time) (model.SamplePair, bool) {
