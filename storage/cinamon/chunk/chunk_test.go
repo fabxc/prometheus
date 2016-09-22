@@ -2,8 +2,10 @@ package chunk
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/prometheus/common/model"
@@ -72,31 +74,109 @@ func TestPlainIterator(t *testing.T) {
 	require.Equal(t, exp[6:], res2)
 }
 
-func BenchmarkPlainIterator(b *testing.B) {
-	c := NewPlainChunk(1000*16 + 1)
-	a := c.Appender()
-
+func benchmarkIterator(b *testing.B, newChunk func(int) Chunk) {
+	var (
+		baseT = model.Now()
+		baseV = 1243535
+	)
 	var exp []model.SamplePair
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < b.N; i++ {
+		baseT += model.Time(rand.Intn(10000))
+		baseV += rand.Intn(10000)
 		exp = append(exp, model.SamplePair{
-			Timestamp: model.Time(i * 2),
-			Value:     model.SampleValue(i * 2),
+			Timestamp: baseT,
+			Value:     model.SampleValue(baseV),
 		})
-		require.NoError(b, a.Append(model.Time(i*2), model.SampleValue(i*2)))
 	}
-
-	it := c.Iterator()
-	res := make([]model.SamplePair, 0, len(exp))
+	var chunks []Chunk
+	for i := 0; i < b.N; {
+		c := newChunk(1024)
+		a := c.Appender()
+		for i < b.N {
+			if err := a.Append(exp[i].Timestamp, exp[i].Value); err == ErrChunkFull {
+				break
+			} else if err != nil {
+				b.Fatal(err)
+			}
+			i++
+		}
+		chunks = append(chunks, c)
+	}
+	fmt.Println("created chunks", len(chunks))
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		for s, ok := it.Seek(0); ok; s, ok = it.Next() {
+	res := make([]model.SamplePair, 0, 1024)
+	for i := 0; i < len(chunks); i++ {
+		c := chunks[i]
+		it := c.Iterator()
+
+		for s, ok := it.First(); ok; s, ok = it.Next() {
 			res = append(res, s)
 		}
 		if it.Err() != io.EOF {
 			b.Fatal(it.Err())
 		}
+		res = res[:0]
 	}
+}
+
+func BenchmarkPlainIterator(b *testing.B) {
+	benchmarkIterator(b, func(sz int) Chunk {
+		return NewPlainChunk(sz)
+	})
+}
+
+func BenchmarkDoubleDeltaIterator(b *testing.B) {
+	benchmarkIterator(b, func(sz int) Chunk {
+		return NewDoubleDeltaChunk(sz)
+	})
+}
+
+func benchmarkAppender(b *testing.B, newChunk func(int) Chunk) {
+	var (
+		baseT = model.Now()
+		baseV = 1243535
+	)
+	var exp []model.SamplePair
+	for i := 0; i < b.N; i++ {
+		baseT += model.Time(rand.Intn(10000))
+		baseV += rand.Intn(10000)
+		exp = append(exp, model.SamplePair{
+			Timestamp: baseT,
+			Value:     model.SampleValue(baseV),
+		})
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	var chunks []Chunk
+	for i := 0; i < b.N; {
+		c := newChunk(1024)
+		a := c.Appender()
+		for i < b.N {
+			if err := a.Append(exp[i].Timestamp, exp[i].Value); err == ErrChunkFull {
+				break
+			} else if err != nil {
+				b.Fatal(err)
+			}
+			i++
+		}
+		chunks = append(chunks, c)
+	}
+	fmt.Println("created chunks", len(chunks))
+}
+
+func BenchmarkPlainAppender(b *testing.B) {
+	benchmarkAppender(b, func(sz int) Chunk {
+		return NewPlainChunk(sz)
+	})
+}
+
+func BenchmarkDoubleDeltaAppender(b *testing.B) {
+	benchmarkAppender(b, func(sz int) Chunk {
+		return NewDoubleDeltaChunk(sz)
+	})
 }
