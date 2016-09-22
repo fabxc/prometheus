@@ -19,8 +19,8 @@ func (e Encoding) String() string {
 		return "none"
 	case EncPlain:
 		return "plain"
-	case EncFloatXOR:
-		return "floatXOR"
+	case EncXOR:
+		return "XOR"
 	case EncDoubleDelta:
 		return "doubleDelta"
 	}
@@ -31,7 +31,7 @@ func (e Encoding) String() string {
 const (
 	EncNone Encoding = iota
 	EncPlain
-	EncFloatXOR
+	EncXOR
 	EncDoubleDelta
 )
 
