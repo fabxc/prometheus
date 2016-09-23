@@ -25,7 +25,7 @@ type Querier struct {
 
 // Querier returns a new Querier on the index at the current point in time.
 func (c *Cinamon) Querier() (*Querier, error) {
-	iq, err := c.index.Querier()
+	iq, err := c.indexer.Querier()
 	if err != nil {
 		return nil, err
 	}

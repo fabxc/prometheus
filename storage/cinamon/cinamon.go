@@ -6,46 +6,74 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fabxc/tindex"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/cinamon/chunk"
 )
 
+// DefaultOptions used for the Cinamon storage.
+var DefaultOptions = &Options{
+	StalenessDelta: 5 * time.Minute,
+}
+
+// Options of the Cinamon storage.
+type Options struct {
+	StalenessDelta time.Duration
+}
+
 // Cinamon is a time series storage.
 type Cinamon struct {
 	mtx sync.RWMutex
 
-	index       *tindex.Index
+	logger log.Logger
+	opts   *Options
+
 	memChunks   *memChunks
 	persistence *persistence
+	indexer     *indexer
+	stopc       chan struct{}
 }
 
 // Open or create a new Cinamon storage.
-func Open(path string) (*Cinamon, error) {
-	ix, err := tindex.Open(filepath.Join(path, "index"), nil)
+func Open(path string, l log.Logger, opts *Options) (*Cinamon, error) {
+	if opts == nil {
+		opts = DefaultOptions
+	}
+
+	indexer, err := newMetricIndexer(filepath.Join(path, "index"), defaultIndexerQsize, defaultIndexerTimeout)
 	if err != nil {
 		return nil, err
 	}
-	pers, err := newPersistence(filepath.Join(path, "chunks"), defaultIndexerQsize, defaultIndexerTimeout)
+	persistence, err := newPersistence(filepath.Join(path, "chunks"), defaultIndexerQsize, defaultIndexerTimeout)
 	if err != nil {
 		return nil, err
 	}
+
+	mchunks := newMemChunks(l, indexer, persistence, 10, opts.StalenessDelta)
+	indexer.mc = mchunks
+	persistence.mc = mchunks
+
 	c := &Cinamon{
-		index:       ix,
-		memChunks:   newMemChunks(ix, pers, 10),
-		persistence: pers,
+		logger:      l,
+		opts:        opts,
+		memChunks:   mchunks,
+		persistence: persistence,
+		indexer:     indexer,
+		stopc:       make(chan struct{}),
 	}
+	go c.memChunks.run(c.stopc)
+
 	return c, nil
 }
 
-// Stop the storage and persist all writes.
-func (c *Cinamon) Stop() error {
+// Close the storage and persist all writes.
+func (c *Cinamon) Close() error {
+	close(c.stopc)
 	// TODO(fabxc): blocking further writes here necessary?
-	c.memChunks.indexer.wait()
+	c.indexer.wait()
 	c.persistence.wait()
 
-	err0 := c.index.Close()
+	err0 := c.indexer.close()
 	err1 := c.persistence.close()
 	if err0 != nil {
 		return err0
@@ -53,12 +81,33 @@ func (c *Cinamon) Stop() error {
 	return err1
 }
 
+// Append ingestes the samples in the scrape into the storage.
+func (c *Cinamon) Append(scrape *Scrape) error {
+	// Sequentially add samples to in-memory chunks.
+	// TODO(fabxc): evaluate cost of making this atomic.
+	for _, s := range scrape.m {
+		if err := c.memChunks.append(s.met, scrape.ts, s.val); err != nil {
+			// TODO(fabxc): collect in multi error.
+			return err
+		}
+		// TODO(fabxc): increment ingested samples metric.
+	}
+	return nil
+}
+
 // memChunks holds the chunks that are currently being appended to.
 type memChunks struct {
+	logger         log.Logger
+	stalenessDelta time.Duration
+
+	mtx sync.RWMutex
 	// Chunks by their ID as accessed when retrieving a chunk ID from
 	// an index query.
 	chunks map[ChunkID]*chunkDesc
-	mtx    sync.RWMutex
+	// The highest time slice chunks currently have. A new chunk can not
+	// be in a higher slice before all chunks with lower IDs have been
+	// added to the slice.
+	highTime model.Time
 
 	// Power of 2 of chunk shards.
 	num uint8
@@ -72,16 +121,15 @@ type memChunks struct {
 }
 
 // newMemChunks returns a new memChunks sharded by n locks.
-func newMemChunks(ix *tindex.Index, p *persistence, n uint8) *memChunks {
+func newMemChunks(l log.Logger, ix *indexer, p *persistence, n uint8, staleness time.Duration) *memChunks {
 	c := &memChunks{
-		num:         n,
-		chunks:      map[ChunkID]*chunkDesc{},
-		persistence: p,
+		logger:         l,
+		stalenessDelta: staleness,
+		num:            n,
+		chunks:         map[ChunkID]*chunkDesc{},
+		persistence:    p,
+		indexer:        ix,
 	}
-	c.indexer = newMetricIndexer(ix, c, &indexerOpts{
-		qsize:   defaultIndexerQsize,
-		timeout: defaultIndexerTimeout,
-	})
 
 	if n > 63 {
 		panic("invalid shard power")
@@ -95,6 +143,73 @@ func newMemChunks(ix *tindex.Index, p *persistence, n uint8) *memChunks {
 		})
 	}
 	return c
+}
+
+func (mc *memChunks) run(stopc <-chan struct{}) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	f := func() error {
+		for _, cs := range mc.shards {
+			mc.gc(cs)
+		}
+		// Wait for persistence and indexing to finish before reindexing
+		// memory chunks for the new time slice.
+		mc.persistence.wait()
+		mc.indexer.wait()
+
+		mc.mtx.Lock()
+		defer mc.mtx.Unlock()
+
+		curTimeSlice := timeSlice(model.Now())
+		// If the next time slice is in the future, we are done.
+		if curTimeSlice <= mc.highTime {
+			return nil
+		}
+
+		ids := make(ChunkIDs, 0, len(mc.chunks))
+		for id := range mc.chunks {
+			ids = append(ids, id)
+		}
+
+		if err := mc.indexer.reindexTime(ids, curTimeSlice); err != nil {
+			return err
+		}
+		mc.highTime = curTimeSlice
+		return nil
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := f(); err != nil {
+				mc.logger.With("err", err).Error("memory chunk maintenance failed")
+			}
+		case <-stopc:
+			return
+		}
+	}
+}
+
+// gc writes stale and incomplete chunks to persistence and removes them
+// from the shard.
+func (mc *memChunks) gc(cs *memChunksShard) {
+	cs.RLock()
+	defer cs.RUnlock()
+
+	mint := model.Now().Add(-mc.stalenessDelta)
+
+	for fp, cdescs := range cs.descs {
+		for _, cd := range cdescs {
+			// If the last sample was added before the staleness delta, consider
+			// the chunk inactive and persist it.
+			if cd.lastSample.Timestamp.Before(mint) {
+				mc.persistence.enqueue(cd)
+				cs.del(fp, cd)
+			}
+		}
+	}
+	return
 }
 
 func (mc *memChunks) append(m model.Metric, ts model.Time, v model.SampleValue) error {
@@ -112,7 +227,13 @@ func (mc *memChunks) append(m model.Metric, ts model.Time, v model.SampleValue) 
 		return err
 	}
 	// Chunk was full, remove it so a new head chunk can be created.
+	// TODO(fabxc): should we just remove them during maintenance if we set a 'persisted'
+	// flag?
+	// If we shutdown we work down the persistence queue before exiting, so we should
+	// lose no data. If we crash, the last snapshot will still have the chunk. Theoretically,
+	// deleting it here should not be a problem.
 	cs.del(fp, chkd)
+
 	mc.persistence.enqueue(chkd)
 
 	// Create a new chunk lazily and continue.
@@ -147,7 +268,7 @@ func (cs *memChunksShard) get(fp model.Fingerprint, m model.Metric) (*chunkDesc,
 	// None of the given chunks was for the metric, create a new one.
 	cd := &chunkDesc{
 		met:   m,
-		chunk: chunk.NewPlainChunk(cs.csize),
+		chunk: chunk.NewDoubleDeltaChunk(cs.csize),
 	}
 	// Try inserting chunk in existing whole before appending.
 	for i, c := range chunks {
@@ -173,11 +294,22 @@ func (cs *memChunksShard) del(fp model.Fingerprint, chkd *chunkDesc) {
 // ChunkID is a unique identifier for a chunk.
 type ChunkID uint64
 
+// ChunkIDs is a sortable list of chunk IDs.
+type ChunkIDs []ChunkID
+
+func (c ChunkIDs) Len() int           { return len(c) }
+func (c ChunkIDs) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
+func (c ChunkIDs) Less(i, j int) bool { return c[i] < c[j] }
+
 // chunkDesc wraps a plain data chunk and provides cached meta data about it.
 type chunkDesc struct {
 	id    ChunkID
 	met   model.Metric
 	chunk chunk.Chunk
+
+	// Caching fields.
+	firstTime  model.Time
+	lastSample model.SamplePair
 
 	app chunk.Appender // Current appender for the chunk.
 }
@@ -185,22 +317,13 @@ type chunkDesc struct {
 func (cd *chunkDesc) append(ts model.Time, v model.SampleValue) error {
 	if cd.app == nil {
 		cd.app = cd.chunk.Appender()
+		// TODO(fabxc): set correctly once loading from snapshot is added.
+		cd.firstTime = ts
 	}
-	return cd.app.Append(ts, v)
-}
+	cd.lastSample.Timestamp = ts
+	cd.lastSample.Value = v
 
-// Append ingestes the samples in the scrape into the storage.
-func (c *Cinamon) Append(scrape *Scrape) error {
-	// Sequentially add samples to in-memory chunks.
-	// TODO(fabxc): evaluate cost of making this atomic.
-	for _, s := range scrape.m {
-		if err := c.memChunks.append(s.met, scrape.ts, s.val); err != nil {
-			// TODO(fabxc): collect in multi error.
-			return err
-		}
-		// TODO(fabxc): increment ingested samples metric.
-	}
-	return nil
+	return cd.app.Append(ts, v)
 }
 
 // Scrape gathers samples for a single timestamp.

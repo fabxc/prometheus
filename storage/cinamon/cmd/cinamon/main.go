@@ -14,6 +14,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/cinamon"
 	"github.com/prometheus/prometheus/storage/local"
@@ -130,7 +131,7 @@ func (b *writeBenchmark) run(cmd *cobra.Command, args []string) {
 
 	measureTime("ingestScrapes", func() {
 		b.startProfiling()
-		if err := b.ingestScrapes(metrics, 2000); err != nil {
+		if err := b.ingestScrapes(metrics, 1000); err != nil {
 			exitWithError(err)
 		}
 	})
@@ -175,7 +176,7 @@ func (b *writeBenchmark) ingestScrapesShard(metrics []model.Metric, scrapeCount 
 		sc.Reset(base + model.Time(i*10000))
 
 		for _, m := range metrics {
-			sc.Add(m, model.SampleValue(rand.Float64()))
+			sc.Add(m, model.SampleValue(float64(rand.Int63())))
 		}
 		if err := b.storage.ingestScrape(&sc); err != nil {
 			return err
@@ -194,7 +195,7 @@ type cinamonStorage struct {
 }
 
 func (c *cinamonStorage) stop() error {
-	return c.c.Stop()
+	return c.c.Close()
 }
 
 func (c *cinamonStorage) ingestScrape(s *cinamon.Scrape) error {
@@ -202,7 +203,7 @@ func (c *cinamonStorage) ingestScrape(s *cinamon.Scrape) error {
 }
 
 func newCinamonStorage(path string) (*cinamonStorage, error) {
-	c, err := cinamon.Open(path)
+	c, err := cinamon.Open(path, log.Base(), nil)
 	if err != nil {
 		return nil, err
 	}

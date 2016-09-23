@@ -14,6 +14,7 @@ import (
 type persistence struct {
 	*chunkBatchProcessor
 
+	mc     *memChunks
 	chunks *pagebuf.DB
 	index  *bolt.DB
 }
@@ -72,11 +73,14 @@ func (p *persistence) persist(cds ...*chunkDesc) error {
 			if err := bkt.Put(buf[:8], buf[8:]); err != nil {
 				return err
 			}
+
+			tx.ids = append(tx.ids, cd.id)
 		}
 		return nil
 	})
 	return err
 }
+
 func (p *persistence) update(f func(*persistenceTx) error) error {
 	tx, err := p.begin(true)
 	if err != nil {
@@ -110,6 +114,8 @@ type persistenceTx struct {
 	p      *persistence
 	ix     *bolt.Tx
 	chunks *pagebuf.Tx
+
+	ids []ChunkID
 }
 
 func (tx *persistenceTx) commit() error {
@@ -121,6 +127,15 @@ func (tx *persistenceTx) commit() error {
 		// TODO(fabxc): log orphaned chunks. What about overwritten ones?
 		// Should we not allows delete and add in the same tx so this cannot happen?
 		return err
+	}
+
+	// Successfully persisted chunks, clear them from the in-memory
+	// forward mapping.
+	tx.p.mc.mtx.Lock()
+	defer tx.p.mc.mtx.Unlock()
+
+	for _, id := range tx.ids {
+		delete(tx.p.mc.chunks, id)
 	}
 	return nil
 }
