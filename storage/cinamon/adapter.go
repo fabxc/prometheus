@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fabxc/tindex"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/metric"
@@ -78,12 +79,31 @@ func (da *DefaultAdapter) QueryInstant(ctx context.Context, ts model.Time, stale
 // have no samples in the specified interval from the returned map. In
 // doubt, specify model.Earliest for from and model.Latest for through.
 func (da *DefaultAdapter) MetricsForLabelMatchers(ctx context.Context, from, through model.Time, matcherSets ...metric.LabelMatchers) ([]metric.Metric, error) {
-	// q, err := da.c.Querier()
-	// if err != nil {
-	//     return nil, err
-	// }
-	// it, err := q.Iterator()
-	return nil, fmt.Errorf("not implemented")
+	q, err := da.c.Querier()
+	if err != nil {
+		return nil, err
+	}
+	var mits []tindex.Iterator
+	for _, ms := range matcherSets {
+		it, err := q.Iterator(ms...)
+		if err != nil {
+			q.Close()
+			return nil, err
+		}
+		// tit, err := q.RangeIterator(from, through)
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// mits = append(mits, tindex.Intersect(it, tit))
+		mits = append(mits, it)
+	}
+
+	res, err := q.Metrics(tindex.Merge(mits...))
+	if err == nil {
+		return res, q.Close()
+	}
+	q.Close()
+	return nil, err
 }
 
 // LastSampleForFingerprint returns the last sample that has been

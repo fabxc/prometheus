@@ -1,7 +1,9 @@
 package cinamon
 
 import (
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/fabxc/tindex"
 	"github.com/prometheus/common/model"
@@ -38,37 +40,34 @@ func (q *Querier) Close() error {
 
 // Iterator returns an iterator over all chunks that match all given
 // label matchers. The iterator is only valid until the Querier is closed.
-func (q *Querier) Iterator(ms ...*metric.LabelMatcher) (tindex.Iterator, error) {
-	// matchers := make([]tindex.Matcher, 0, len(ms))
-	// for _, m := range ms {
-	// 	switch m.Type {
-	// 	case metric.Equal:
-	// 		matchers = append(matchers, tindex.NewEqualMatcher(string(m.Name), string(m.Value)))
-	// 	case metric.RegexMatch:
-	// 		nm, err := tindex.NewRegexpMatcher(string(m.Name), string(m.Value))
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		matchers = append(matchers, nm)
-	// 	default:
-	// 		return nil, fmt.Errorf("matcher type %q not supported", m.Type)
-	// 	}
-	// }
-	// var its []tindex.Iterator
-	// for _, m := range matchers {
-	// 	it, err := q.iq.Search(m)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	if it != nil {
-	// 		its = append(its, it)
-	// 	}
-	// }
-	// if len(its) == 0 {
-	// 	return nil, errors.New("not found")
-	// }
-	// return tindex.Intersect(its...), nil
-	return nil, fmt.Errorf("not implemented")
+func (q *Querier) Iterator(matchers ...*metric.LabelMatcher) (tindex.Iterator, error) {
+	var its []tindex.Iterator
+	for _, m := range matchers {
+		var matcher tindex.Matcher
+		switch m.Type {
+		case metric.Equal:
+			matcher = tindex.NewEqualMatcher(string(m.Value))
+		case metric.RegexMatch:
+			var err error
+			matcher, err = tindex.NewRegexpMatcher(string(m.Value))
+			if err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("matcher type %q not supported", m.Type)
+		}
+		it, err := q.iq.Search(string(m.Name), matcher)
+		if err != nil {
+			return nil, err
+		}
+		if it != nil {
+			its = append(its, it)
+		}
+	}
+	if len(its) == 0 {
+		return nil, errors.New("not found")
+	}
+	return tindex.Intersect(its...), nil
 }
 
 // RangeIterator returns an iterator over chunks that are present in the given time range.
@@ -91,5 +90,28 @@ func (q *Querier) Series(it tindex.Iterator) ([]SeriesIterator, error) {
 
 // Metrics returns the unique metrics found across all chunks in the provided iterator.
 func (q *Querier) Metrics(it tindex.Iterator) ([]metric.Metric, error) {
-	return nil, nil
+	m := []metric.Metric{}
+	fps := map[model.Fingerprint]struct{}{}
+
+	id, err := it.Seek(0)
+	for ; err == nil; id, err = it.Next() {
+		terms, err := q.iq.Doc(id)
+		if err != nil {
+			return nil, err
+		}
+		met := make(model.Metric, len(terms))
+		for _, t := range terms {
+			met[model.LabelName(t.Field)] = model.LabelValue(t.Val)
+		}
+		fp := met.Fingerprint()
+		if _, ok := fps[fp]; ok {
+			continue
+		}
+		fps[fp] = struct{}{}
+		m = append(m, metric.Metric{Metric: met, Copied: true})
+	}
+	if err != io.EOF {
+		return nil, err
+	}
+	return m, nil
 }
