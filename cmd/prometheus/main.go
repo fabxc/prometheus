@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/prometheus/retrieval"
 	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/storage/cinamon"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/web"
@@ -81,12 +82,23 @@ func Main() int {
 	)
 
 	var localStorage local.Storage
+	var err error
 	switch cfg.localStorageEngine {
 	case "persisted":
 		localStorage = local.NewMemorySeriesStorage(&cfg.storage)
 		sampleAppender = storage.Fanout{localStorage}
 	case "none":
 		localStorage = &local.NoopStorage{}
+	case "cinamon":
+		// This is hacking in the Cinamon storage engine. Flags are taken from the default storage
+		// where applicable.
+		c, err := cinamon.Open(cfg.storage.PersistenceStoragePath+"/cinamon/", log.Base(), nil)
+		if err != nil {
+			log.Error("Initializing cinamon storage failed: %s", err)
+			return 1
+		}
+		localStorage = cinamon.NewDefaultAdapter(c)
+		sampleAppender = storage.Fanout{localStorage}
 	default:
 		log.Errorf("Invalid local storage engine %q", cfg.localStorageEngine)
 		return 1

@@ -268,7 +268,7 @@ func (cs *memChunksShard) get(fp model.Fingerprint, m model.Metric) (*chunkDesc,
 	// None of the given chunks was for the metric, create a new one.
 	cd := &chunkDesc{
 		met:   m,
-		chunk: chunk.NewDoubleDeltaChunk(cs.csize),
+		chunk: chunk.NewPlainChunk(cs.csize),
 	}
 	// Try inserting chunk in existing whole before appending.
 	for i, c := range chunks {

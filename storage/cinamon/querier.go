@@ -1,7 +1,6 @@
 package cinamon
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/fabxc/tindex"
@@ -40,35 +39,36 @@ func (q *Querier) Close() error {
 // Iterator returns an iterator over all chunks that match all given
 // label matchers. The iterator is only valid until the Querier is closed.
 func (q *Querier) Iterator(ms ...*metric.LabelMatcher) (tindex.Iterator, error) {
-	matchers := make([]tindex.Matcher, 0, len(ms))
-	for _, m := range ms {
-		switch m.Type {
-		case metric.Equal:
-			matchers = append(matchers, tindex.NewEqualMatcher(string(m.Name), string(m.Value)))
-		case metric.RegexMatch:
-			nm, err := tindex.NewRegexpMatcher(string(m.Name), string(m.Value))
-			if err != nil {
-				return nil, err
-			}
-			matchers = append(matchers, nm)
-		default:
-			return nil, fmt.Errorf("matcher type %q not supported", m.Type)
-		}
-	}
-	var its []tindex.Iterator
-	for _, m := range matchers {
-		it, err := q.iq.Search(m)
-		if err != nil {
-			return nil, err
-		}
-		if it != nil {
-			its = append(its, it)
-		}
-	}
-	if len(its) == 0 {
-		return nil, errors.New("not found")
-	}
-	return tindex.Intersect(its...), nil
+	// matchers := make([]tindex.Matcher, 0, len(ms))
+	// for _, m := range ms {
+	// 	switch m.Type {
+	// 	case metric.Equal:
+	// 		matchers = append(matchers, tindex.NewEqualMatcher(string(m.Name), string(m.Value)))
+	// 	case metric.RegexMatch:
+	// 		nm, err := tindex.NewRegexpMatcher(string(m.Name), string(m.Value))
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+	// 		matchers = append(matchers, nm)
+	// 	default:
+	// 		return nil, fmt.Errorf("matcher type %q not supported", m.Type)
+	// 	}
+	// }
+	// var its []tindex.Iterator
+	// for _, m := range matchers {
+	// 	it, err := q.iq.Search(m)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	if it != nil {
+	// 		its = append(its, it)
+	// 	}
+	// }
+	// if len(its) == 0 {
+	// 	return nil, errors.New("not found")
+	// }
+	// return tindex.Intersect(its...), nil
+	return nil, fmt.Errorf("not implemented")
 }
 
 // RangeIterator returns an iterator over chunks that are present in the given time range.

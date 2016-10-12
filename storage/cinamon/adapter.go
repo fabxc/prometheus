@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/metric"
+	"golang.org/x/net/context"
 )
 
 // DefaultAdapter wraps a Cinamon storage to implement the default
@@ -14,9 +16,13 @@ type DefaultAdapter struct {
 	c *Cinamon
 }
 
+func NewDefaultAdapter(c *Cinamon) *DefaultAdapter {
+	return &DefaultAdapter{c: c}
+}
+
 // Drop all time series associated with the given label matchers. Returns
 // the number series that were dropped.
-func (da *DefaultAdapter) DropMetricsForLabelMatchers(...*metric.LabelMatcher) (int, error) {
+func (da *DefaultAdapter) DropMetricsForLabelMatchers(context.Context, ...*metric.LabelMatcher) (int, error) {
 	return 0, fmt.Errorf("not implemented")
 }
 
@@ -52,13 +58,13 @@ func (da *DefaultAdapter) NeedsThrottling() bool {
 // QueryRange returns a list of series iterators for the selected
 // time range and label matchers. The iterators need to be closed
 // after usage.
-func (da *DefaultAdapter) QueryRange(from, through model.Time, matchers ...*metric.LabelMatcher) ([]SeriesIterator, error) {
+func (da *DefaultAdapter) QueryRange(ctx context.Context, from, through model.Time, matchers ...*metric.LabelMatcher) ([]local.SeriesIterator, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
 // QueryInstant returns a list of series iterators for the selected
 // instant and label matchers. The iterators need to be closed after usage.
-func (da *DefaultAdapter) QueryInstant(ts model.Time, stalenessDelta time.Duration, matchers ...*metric.LabelMatcher) ([]SeriesIterator, error) {
+func (da *DefaultAdapter) QueryInstant(ctx context.Context, ts model.Time, stalenessDelta time.Duration, matchers ...*metric.LabelMatcher) ([]local.SeriesIterator, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -71,7 +77,7 @@ func (da *DefaultAdapter) QueryInstant(ts model.Time, stalenessDelta time.Durati
 // storage to optimize the search. The storage MAY exclude metrics that
 // have no samples in the specified interval from the returned map. In
 // doubt, specify model.Earliest for from and model.Latest for through.
-func (da *DefaultAdapter) MetricsForLabelMatchers(from, through model.Time, matcherSets ...metric.LabelMatchers) ([]metric.Metric, error) {
+func (da *DefaultAdapter) MetricsForLabelMatchers(ctx context.Context, from, through model.Time, matcherSets ...metric.LabelMatchers) ([]metric.Metric, error) {
 	// q, err := da.c.Querier()
 	// if err != nil {
 	//     return nil, err
@@ -86,11 +92,20 @@ func (da *DefaultAdapter) MetricsForLabelMatchers(from, through model.Time, matc
 // the last ingestion is so long ago that the series has been archived),
 // ZeroSample is returned. The label matching behavior is the same as in
 // MetricsForLabelMatchers.
-func (da *DefaultAdapter) LastSampleForLabelMatchers(cutoff model.Time, matcherSets ...metric.LabelMatchers) (model.Vector, error) {
+func (da *DefaultAdapter) LastSampleForLabelMatchers(ctx context.Context, cutoff model.Time, matcherSets ...metric.LabelMatchers) (model.Vector, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
 // Get all of the label values that are associated with a given label name.
-func (da *DefaultAdapter) LabelValuesForLabelName(model.LabelName) (model.LabelValues, error) {
-	return nil, fmt.Errorf("not implemented")
+func (da *DefaultAdapter) LabelValuesForLabelName(ctx context.Context, ln model.LabelName) (model.LabelValues, error) {
+	q, err := da.c.Querier()
+	if err != nil {
+		return nil, err
+	}
+	res := q.iq.Terms(string(ln), nil)
+	resv := model.LabelValues{}
+	for _, lv := range res {
+		resv = append(resv, model.LabelValue(lv))
+	}
+	return resv, q.Close()
 }
