@@ -2,6 +2,7 @@
 package cinamon
 
 import (
+	"encoding/binary"
 	"path/filepath"
 	"sync"
 	"time"
@@ -23,8 +24,6 @@ type Options struct {
 
 // Cinamon is a time series storage.
 type Cinamon struct {
-	mtx sync.RWMutex
-
 	logger log.Logger
 	opts   *Options
 
@@ -293,6 +292,12 @@ func (cs *memChunksShard) del(fp model.Fingerprint, chkd *chunkDesc) {
 
 // ChunkID is a unique identifier for a chunk.
 type ChunkID uint64
+
+func (id ChunkID) bytes() []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, uint64(id))
+	return b
+}
 
 // ChunkIDs is a sortable list of chunk IDs.
 type ChunkIDs []ChunkID

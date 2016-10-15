@@ -93,6 +93,18 @@ func (p *persistence) update(f func(*persistenceTx) error) error {
 	return tx.commit()
 }
 
+func (p *persistence) view(f func(*persistenceTx) error) error {
+	tx, err := p.begin(false)
+	if err != nil {
+		return err
+	}
+	if err := f(tx); err != nil {
+		tx.rollback()
+		return err
+	}
+	return tx.rollback()
+}
+
 func (p *persistence) begin(writeable bool) (*persistenceTx, error) {
 	var err error
 	tx := &persistenceTx{p: p}
@@ -104,6 +116,7 @@ func (p *persistence) begin(writeable bool) (*persistenceTx, error) {
 	}
 	tx.chunks, err = p.chunks.Begin(writeable)
 	if err != nil {
+		tx.ix.Rollback()
 		return nil, err
 	}
 

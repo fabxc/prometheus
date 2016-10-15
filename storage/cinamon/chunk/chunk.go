@@ -3,6 +3,7 @@ package chunk
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"sync/atomic"
@@ -46,6 +47,21 @@ type Chunk interface {
 	Data() []byte
 	Appender() Appender
 	Iterator() Iterator
+}
+
+// FromData returns a chunk from a byte slice of chunk data.
+func FromData(d []byte) (Chunk, error) {
+	if len(d) == 0 {
+		return nil, fmt.Errorf("no data")
+	}
+	e := Encoding(d[0])
+
+	switch e {
+	case EncPlain:
+		rc := rawChunk{d: d, l: uint64(len(d))}
+		return &PlainChunk{rawChunk: rc}, nil
+	}
+	return nil, fmt.Errorf("unknown chunk encoding: %d", e)
 }
 
 // Iterator provides iterating access over sample pairs in a chunk.

@@ -66,12 +66,6 @@ func (ix *indexer) close() error {
 }
 
 func (ix *indexer) index(cds ...*chunkDesc) error {
-	// We have to lock here already instead of post-commit as otherwise we might
-	// generate new chunk IDs, skip their indexing, and have a reindexTime being
-	// called with the chunk ID not being visible yet.
-	ix.mc.mtx.Lock()
-	defer ix.mc.mtx.Unlock()
-
 	b, err := ix.ix.Batch()
 	if err != nil {
 		return err
@@ -103,6 +97,13 @@ func (ix *indexer) index(cds ...*chunkDesc) error {
 	if err := b.Commit(); err != nil {
 		return err
 	}
+
+	// We have to lock here already instead of post-commit as otherwise we might
+	// generate new chunk IDs, skip their indexing, and have a reindexTime being
+	// called with the chunk ID not being visible yet.
+	// TODO(fabxc): move back up
+	ix.mc.mtx.Lock()
+	defer ix.mc.mtx.Unlock()
 
 	// Make in-memory chunks visible for read.
 	for i, cd := range cds {

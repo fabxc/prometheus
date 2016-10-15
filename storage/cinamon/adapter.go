@@ -11,6 +11,36 @@ import (
 	"golang.org/x/net/context"
 )
 
+type DefaultSeriesIterator struct {
+	it SeriesIterator
+}
+
+func (it *DefaultSeriesIterator) ValueAtOrBeforeTime(ts model.Time) model.SamplePair {
+	sp, ok := it.it.Seek(ts)
+	if !ok {
+		return model.ZeroSamplePair
+	}
+	return sp
+}
+
+func (it *DefaultSeriesIterator) Metric() metric.Metric {
+	return it.it.Metric()
+}
+
+func (it *DefaultSeriesIterator) RangeValues(interval metric.Interval) []model.SamplePair {
+	var res []model.SamplePair
+	for sp, ok := it.it.Seek(interval.NewestInclusive); ok; sp, ok = it.it.Next() {
+		if sp.Timestamp > interval.OldestInclusive {
+			break
+		}
+		res = append(res, sp)
+	}
+	return res
+}
+
+func (it *DefaultSeriesIterator) Close() {
+}
+
 // DefaultAdapter wraps a Cinamon storage to implement the default
 // storage interface.
 type DefaultAdapter struct {
@@ -56,17 +86,45 @@ func (da *DefaultAdapter) NeedsThrottling() bool {
 	return false
 }
 
+func (da *DefaultAdapter) Querier() (local.Querier, error) {
+	q, err := da.c.Querier()
+	if err != nil {
+		return nil, err
+	}
+	return defaultQuerierAdapter{q: q}, nil
+}
+
+type defaultQuerierAdapter struct {
+	q *Querier
+}
+
+func (da defaultQuerierAdapter) Close() error {
+	return da.q.Close()
+}
+
 // QueryRange returns a list of series iterators for the selected
 // time range and label matchers. The iterators need to be closed
 // after usage.
-func (da *DefaultAdapter) QueryRange(ctx context.Context, from, through model.Time, matchers ...*metric.LabelMatcher) ([]local.SeriesIterator, error) {
-	return nil, fmt.Errorf("not implemented")
+func (da defaultQuerierAdapter) QueryRange(ctx context.Context, from, through model.Time, matchers ...*metric.LabelMatcher) ([]local.SeriesIterator, error) {
+	it, err := da.q.Iterator(matchers...)
+	if err != nil {
+		return nil, err
+	}
+	its, err := da.q.Series(it)
+	if err != nil {
+		return nil, err
+	}
+	var defaultIts []local.SeriesIterator
+	for _, it := range its {
+		defaultIts = append(defaultIts, &DefaultSeriesIterator{it: it})
+	}
+	return defaultIts, nil
 }
 
 // QueryInstant returns a list of series iterators for the selected
 // instant and label matchers. The iterators need to be closed after usage.
-func (da *DefaultAdapter) QueryInstant(ctx context.Context, ts model.Time, stalenessDelta time.Duration, matchers ...*metric.LabelMatcher) ([]local.SeriesIterator, error) {
-	return nil, fmt.Errorf("not implemented")
+func (da defaultQuerierAdapter) QueryInstant(ctx context.Context, ts model.Time, stalenessDelta time.Duration, matchers ...*metric.LabelMatcher) ([]local.SeriesIterator, error) {
+	return da.QueryRange(ctx, ts.Add(-stalenessDelta), ts, matchers...)
 }
 
 // MetricsForLabelMatchers returns the metrics from storage that satisfy
@@ -78,16 +136,11 @@ func (da *DefaultAdapter) QueryInstant(ctx context.Context, ts model.Time, stale
 // storage to optimize the search. The storage MAY exclude metrics that
 // have no samples in the specified interval from the returned map. In
 // doubt, specify model.Earliest for from and model.Latest for through.
-func (da *DefaultAdapter) MetricsForLabelMatchers(ctx context.Context, from, through model.Time, matcherSets ...metric.LabelMatchers) ([]metric.Metric, error) {
-	q, err := da.c.Querier()
-	if err != nil {
-		return nil, err
-	}
+func (da defaultQuerierAdapter) MetricsForLabelMatchers(ctx context.Context, from, through model.Time, matcherSets ...metric.LabelMatchers) ([]metric.Metric, error) {
 	var mits []tindex.Iterator
 	for _, ms := range matcherSets {
-		it, err := q.Iterator(ms...)
+		it, err := da.q.Iterator(ms...)
 		if err != nil {
-			q.Close()
 			return nil, err
 		}
 		// tit, err := q.RangeIterator(from, through)
@@ -98,12 +151,7 @@ func (da *DefaultAdapter) MetricsForLabelMatchers(ctx context.Context, from, thr
 		mits = append(mits, it)
 	}
 
-	res, err := q.Metrics(tindex.Merge(mits...))
-	if err == nil {
-		return res, q.Close()
-	}
-	q.Close()
-	return nil, err
+	return da.q.Metrics(tindex.Merge(mits...))
 }
 
 // LastSampleForFingerprint returns the last sample that has been
@@ -112,20 +160,16 @@ func (da *DefaultAdapter) MetricsForLabelMatchers(ctx context.Context, from, thr
 // the last ingestion is so long ago that the series has been archived),
 // ZeroSample is returned. The label matching behavior is the same as in
 // MetricsForLabelMatchers.
-func (da *DefaultAdapter) LastSampleForLabelMatchers(ctx context.Context, cutoff model.Time, matcherSets ...metric.LabelMatchers) (model.Vector, error) {
+func (da defaultQuerierAdapter) LastSampleForLabelMatchers(ctx context.Context, cutoff model.Time, matcherSets ...metric.LabelMatchers) (model.Vector, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
 // Get all of the label values that are associated with a given label name.
-func (da *DefaultAdapter) LabelValuesForLabelName(ctx context.Context, ln model.LabelName) (model.LabelValues, error) {
-	q, err := da.c.Querier()
-	if err != nil {
-		return nil, err
-	}
-	res := q.iq.Terms(string(ln), nil)
+func (da defaultQuerierAdapter) LabelValuesForLabelName(ctx context.Context, ln model.LabelName) (model.LabelValues, error) {
+	res := da.q.iq.Terms(string(ln), nil)
 	resv := model.LabelValues{}
 	for _, lv := range res {
 		resv = append(resv, model.LabelValue(lv))
 	}
-	return resv, q.Close()
+	return resv, nil
 }
